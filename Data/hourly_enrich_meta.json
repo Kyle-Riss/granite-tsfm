@@ -1,0 +1,14 @@
+{
+  "min_year": 2020,
+  "temp_sources": {
+    "open_meteo": 175392
+  },
+  "rows": 175392,
+  "regions": [
+    "강원도",
+    "대전시",
+    "부산시",
+    "서울시"
+  ],
+  "feature_note": "is_dr_window_proxy: weekday 14–18 May–Sep heuristic (not KPX dispatch log). is_kpx_peak_hour: Jun–Aug weekday afternoon peak heuristic. seoul_district_cv: cross-gu monthly usage dispersion."
+}

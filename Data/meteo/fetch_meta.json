@@ -1,0 +1,12 @@
+{
+  "source": "Open-Meteo Archive API (2m temperature, Asia/Seoul)",
+  "start": "2020-01-01",
+  "end": "2024-12-31",
+  "regions": {
+    "서울시": "/Users/hayubin/Developer/granite-tsfm/Data/meteo/hourly_temp_서울시.parquet",
+    "부산시": "/Users/hayubin/Developer/granite-tsfm/Data/meteo/hourly_temp_부산시.parquet",
+    "대전시": "/Users/hayubin/Developer/granite-tsfm/Data/meteo/hourly_temp_대전시.parquet",
+    "강원도": "/Users/hayubin/Developer/granite-tsfm/Data/meteo/hourly_temp_강원도.parquet"
+  },
+  "note": "Replace with KMA ASOS via download_asos.py when ServiceKey available."
+}

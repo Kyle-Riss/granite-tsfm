@@ -27,5 +27,6 @@
     "services/inference",
     "services/finetuning"
   ],
-  "python.envFile": "${workspaceFolder}/.env"
+  "python.envFile": "${workspaceFolder}/.env",
+  "cursorpyright.analysis.typeCheckingMode": "off"
 }

@@ -30,12 +30,12 @@ dependencies = [
 
 # test commit
 [tool.setuptools]
-packages = ["tsfm_public", "tsfmhfdemos"]
+packages = ["tsfm_public", "tsfmhfdemos", "pipelines", "pipelines.seoul"]
 
 [project.optional-dependencies]
 
 
-all = ["granite-tsfm[notebooks,testing,dev]"]
+all = ["granite-tsfm[notebooks,testing,dev,pipeline]"]
 
 notebooks = [
     "jupyter",
@@ -67,6 +67,15 @@ demos = [
     "kaleido",
     "toml",
 ]
+# DuckDB → Parquet → TSFM/GRU (see pipelines/seoul/)
+pipeline = [
+    "duckdb>=1.1",
+    "pyarrow>=14",
+    "plotly>=5",
+    "holidays>=0.40",
+    "matplotlib>=3.10.8",
+    "scipy>=1.17.1",
+]
 # ###################################################
 
 
@@ -87,7 +96,7 @@ extend-include = ["*.ipynb"]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
-known-first-party = ["tsfm_public"]
+known-first-party = ["tsfm_public", "pipelines"]
 
 [tool.ruff.format]
 # Like Black, use double quotes for strings.

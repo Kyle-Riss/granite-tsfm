@@ -132,6 +132,9 @@ notebooks/thinklab/checkpoint/**
 # Mac personalization files
 *.DS_Store
 
+# Generated pipeline artifacts (Parquet, checkpoints)
+/artifacts/
+
 # Models for demo
 /tsfmhfdemos/neurips/models/
 
