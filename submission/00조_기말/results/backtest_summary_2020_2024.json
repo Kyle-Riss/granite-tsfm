@@ -1,0 +1,60 @@
+{
+  "title": "서울 전력거래량 모델 연간 검증 (2020-2024)",
+  "model": "Granite TTM-r2 (frozen) + GRU head, 학습: 2020-2023 서울",
+  "years": {
+    "2020": {
+      "method": "monthly_spot_check",
+      "hours": 12,
+      "hybrid": 218.0,
+      "hybrid_mae": 184.7,
+      "ttm": null,
+      "gru": null,
+      "naive": null,
+      "note": "월별 22일 한 시점 예측 12회 (참고용, 현재 모델 적용)"
+    },
+    "2021": {
+      "method": "monthly_spot_check",
+      "hours": 12,
+      "hybrid": 257.1,
+      "hybrid_mae": 233.9,
+      "ttm": null,
+      "gru": null,
+      "naive": null,
+      "note": "월별 22일 한 시점 예측 12회 (참고용, 현재 모델 적용)"
+    },
+    "2022": {
+      "method": "year_roll_forward",
+      "hours": 8760,
+      "hybrid": 430.3,
+      "gru": 267.2,
+      "naive": 304.0,
+      "ttm": null,
+      "note": "8,760h roll-forward (학습: 2020-2021, 컨텍스트: 2021년말까지)"
+    },
+    "2023": {
+      "method": "monthly_spot_check",
+      "hours": 12,
+      "hybrid": 246.0,
+      "hybrid_mae": 226.9,
+      "ttm": null,
+      "gru": null,
+      "naive": null,
+      "note": "월별 22일 한 시점 예측 12회 (참고용, 현재 모델 적용)"
+    },
+    "2024": {
+      "method": "block_backtest_91",
+      "hours": 8784,
+      "ttm": 111.5,
+      "gru": 158.9,
+      "hybrid": 167.1,
+      "naive": 107.2,
+      "note": "91블록 × 96h, 완전 out-of-sample (학습: 2020-2023)"
+    }
+  },
+  "interpretation": {
+    "2024": "완전 out-of-sample 블록 백테스트 — 가장 신뢰도 높은 수치",
+    "2022": "컨텍스트(2021년말)까지만 학습한 fair backtest",
+    "2020/2021/2023": "현재 모델(2020-2023 학습) 적용 — 참고용"
+  },
+  "future_basis": "2020-2024 검증된 모델 → 2025-2027 계절 패턴 시뮬레이션"
+}

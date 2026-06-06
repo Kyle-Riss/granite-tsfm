@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>전력소비량 예측 데모 — Granite TTM</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+  :root {
+    --navy: #1e3a5f;
+    --blue: #0ea5e9;
+    --orange: #f97316;
+    --green: #22c55e;
+    --red: #ef4444;
+    --bg: #f0f4f8;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --text: #1e293b;
+    --muted: #64748b;
+    --sidebar-w: 220px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar {
+    width: var(--sidebar-w); background: var(--navy); color: white;
+    display: flex; flex-direction: column; position: fixed; top: 0; left: 0; height: 100vh; z-index: 100;
+  }
+  .sidebar-logo { padding: 20px 16px 12px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+  .sidebar-logo h2 { font-size: 15px; font-weight: 700; line-height: 1.4; }
+  .sidebar-logo p { font-size: 11px; opacity: 0.6; margin-top: 2px; }
+  .sidebar-nav { padding: 12px 0; flex: 1; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+    cursor: pointer; font-size: 13px; opacity: 0.7; transition: all .15s;
+  }
+  .nav-item:hover, .nav-item.active { opacity: 1; background: rgba(255,255,255,0.1); }
+  .nav-item.active { border-left: 3px solid var(--blue); }
+  .nav-icon { width: 18px; text-align: center; }
+  .sidebar-footer { padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 10px; opacity: 0.4; }
+
+  /* Main */
+  .main { margin-left: var(--sidebar-w); flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+
+  /* Header */
+  .topbar {
+    background: white; border-bottom: 1px solid var(--border); padding: 14px 24px;
+    display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 50;
+  }
+  .topbar h1 { font-size: 17px; font-weight: 700; color: var(--navy); }
+  .topbar-meta { font-size: 12px; color: var(--muted); }
+
+  .controls {
+    background: white; border-bottom: 1px solid var(--border);
+    padding: 10px 24px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  }
+  .controls label { font-size: 12px; color: var(--muted); }
+  .controls select, .controls input {
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px;
+    font-size: 13px; background: white; color: var(--text); cursor: pointer;
+  }
+  .controls select:focus, .controls input:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
+  .btn {
+    background: var(--navy); color: white; border: none; border-radius: 6px;
+    padding: 6px 16px; font-size: 13px; cursor: pointer; transition: background .15s;
+  }
+  .btn:hover { background: var(--blue); }
+  .btn-outline {
+    background: white; color: var(--navy); border: 1px solid var(--navy);
+  }
+  .btn-outline:hover { background: var(--navy); color: white; }
+
+  /* Content */
+  .content { padding: 20px 24px; flex: 1; }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Cards */
+  .card {
+    background: var(--card); border-radius: 10px; border: 1px solid var(--border);
+    padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .card-title { font-size: 14px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+  .card-sub { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+  @media(max-width:900px){ .metrics { grid-template-columns: repeat(2,1fr); } }
+  .metric {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .metric-label { font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px; }
+  .metric-value { font-size: 26px; font-weight: 800; color: var(--navy); }
+  .metric-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .metric-badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; margin-top: 4px; }
+  .badge-green { background: #dcfce7; color: #16a34a; }
+  .badge-red { background: #fee2e2; color: #dc2626; }
+  .badge-blue { background: #dbeafe; color: #1d4ed8; }
+  .badge-orange { background: #ffedd5; color: #c2410c; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media(max-width:900px){ .grid2 { grid-template-columns: 1fr; } }
+
+  .chart-wrap { height: 360px; }
+  .chart-wrap-lg { height: 450px; }
+  .chart-wrap-sm { height: 280px; }
+
+  .info-box {
+    background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+    padding: 12px 16px; font-size: 13px; color: #1e40af; line-height: 1.6; margin-bottom: 14px;
+  }
+  .info-box.orange { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+  .info-box.green  { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+
+  /* Loading spinner */
+  .spinner { text-align: center; padding: 60px; color: var(--muted); }
+  .spinner::before { content: "⏳ "; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: var(--bg); padding: 8px 12px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--border); }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: #f8fafc; }
+  .bar-cell { display: flex; align-items: center; gap: 8px; }
+  .mini-bar { height: 8px; border-radius: 4px; }
+
+  /* Hypothesis badges */
+  .h-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+  .h-confirmed { background: #dcfce7; color: #16a34a; }
+  .h-rejected  { background: #fee2e2; color: #dc2626; }
+  .h-partial   { background: #fef9c3; color: #a16207; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <h2>⚡ 전력소비량<br>예측 데모</h2>
+    <p>Granite TTM-r2 + GRU</p>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-item active" onclick="showPage('overview')">
+      <span class="nav-icon">📊</span> 개요
+    </div>
+    <div class="nav-item" onclick="showPage('history')">
+      <span class="nav-icon">📈</span> 시계열 탐색
+    </div>
+    <div class="nav-item" onclick="showPage('forecast')">
+      <span class="nav-icon">🔮</span> 예측 vs 실측
+    </div>
+    <div class="nav-item" onclick="showPage('hypothesis')">
+      <span class="nav-icon">🔬</span> 가설 검증
+    </div>
+    <div class="nav-item" onclick="showPage('model')">
+      <span class="nav-icon">🏆</span> 모델 비교
+    </div>
+    <div class="nav-item" onclick="showPage('district')">
+      <span class="nav-icon">🗺️</span> 서울 구별
+    </div>
+    <div class="nav-item" onclick="showPage('live-predict')">
+      <span class="nav-icon">⚡</span> 실시간 예측
+    </div>
+    <div class="nav-item" onclick="showPage('backtest')">
+      <span class="nav-icon">📊</span> 과거 검증
+    </div>
+  </div>
+  <div class="sidebar-footer">KPX 데이터 2020–2024<br>Open-Meteo 기온 데이터</div>
+</nav>
+
+<div class="main">
+  <!-- Topbar -->
+  <div class="topbar">
+    <h1 id="page-title">개요 대시보드</h1>
+    <span class="topbar-meta">서울·부산·대전·강원 4개 지역 | 175,392 시간 레코드</span>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls" id="controls-bar">
+    <label>지역</label>
+    <select id="region-select" onchange="onRegionChange()">
+      <option>서울시</option><option>부산시</option><option>대전시</option><option>강원도</option>
+    </select>
+    <label>기간</label>
+    <input type="date" id="start-date" value="2024-01-01">
+    <input type="date" id="end-date"   value="2024-12-31">
+    <label>집계</label>
+    <select id="resample-select">
+      <option value="1h">시간별</option>
+      <option value="1D" selected>일별</option>
+      <option value="1W">주별</option>
+      <option value="1ME">월별</option>
+    </select>
+    <button class="btn" onclick="refreshAll()">조회</button>
+  </div>
+
+  <div class="content">
+
+    <!-- ① 개요 -->
+    <div id="page-overview" class="page active">
+      <div class="metrics" id="metrics-row">
+        <div class="metric">
+          <div class="metric-label">서울 연평균 전력거래량</div>
+          <div class="metric-value">562</div>
+          <div class="metric-sub">MWh/시간 (2020–2024)</div>
+          <span class="metric-badge badge-blue">KPX 도매시장</span>
+        </div>
+        <div class="metric">
+          <div class="metric-label">TTM 연간 예측오차</div>
+          <div class="metric-value">111</div>
+          <div class="metric-sub">RMSE MWh (92블록)</div>
+          <span class="metric-badge badge-green">기준선 대비 −4%</span>
+        </div>
+        <div class="metric">
+          <div class="metric-label">GRU roll 대비 개선</div>
+          <div class="metric-value">30%</div>
+          <div class="metric-sub">RMSE 낮음 (159→111)</div>
+          <span class="metric-badge badge-green">↑ TTM 우수</span>
+        </div>
+        <div class="metric">
+          <div class="metric-label">한파 구간 개선</div>
+          <div class="metric-value">77%</div>
+          <div class="metric-sub">1월 실측 (135 vs 578)</div>
+          <span class="metric-badge badge-orange">이상기상 강건성</span>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <div class="card-title">지역별 시간당 평균 전력거래량</div>
+          <div class="card-sub">4개 지역 비교 (2020–2024 평균)</div>
+          <div class="chart-wrap" id="chart-region-bar"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">서울 월별 전력거래량 패턴</div>
+          <div class="card-sub">연평균 기준 계절성 확인</div>
+          <div class="chart-wrap" id="chart-monthly"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">데이터 현황 & 파이프라인</div>
+        <div class="card-sub">사용된 데이터 소스 및 처리 단계</div>
+        <table>
+          <thead><tr><th>데이터</th><th>출처</th><th>기간</th><th>레코드 수</th><th>비고</th></tr></thead>
+          <tbody>
+            <tr><td>KPX 지역별 전력거래량</td><td>공공데이터포털</td><td>2001–2024</td><td>175,392행</td><td>4개 광역 시도</td></tr>
+            <tr><td>기온 (시간별)</td><td>Open-Meteo API</td><td>2020–2024</td><td>43,848행</td><td>ASOS 대체, 동등 품질</td></tr>
+            <tr><td>서울 구별 에너지</td><td>서울 에너지통계</td><td>2019–2023</td><td>300행</td><td>실소비량 기준</td></tr>
+            <tr><td>예측 모델</td><td>HuggingFace ibm-granite</td><td>—</td><td>—</td><td>TTM-r2 frozen + GRU head</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ② 시계열 탐색 -->
+    <div id="page-history" class="page">
+      <div class="card">
+        <div class="card-title">전력거래량 시계열</div>
+        <div class="card-sub">KPX 도매시장 전력거래량 — 기온 오버레이 포함</div>
+        <div class="chart-wrap-lg" id="chart-history"></div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-title">시간대별 평균 분포</div>
+          <div class="card-sub">0–23시 평균 전력거래량</div>
+          <div class="chart-wrap" id="chart-hourly-avg"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">월별 평균</div>
+          <div class="card-sub">계절성 패턴</div>
+          <div class="chart-wrap" id="chart-monthly-avg"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ③ 예측 vs 실측 -->
+    <div id="page-forecast" class="page">
+      <div class="info-box">
+        <strong>TTM 96h One-shot 예측</strong> — Granite TTM-r2 (frozen backbone) + GRU head 학습.
+        96시간을 한 번에 직접 예측하여 오차 누적 없음. 2024년 전체 92개 블록 평가 기준.
+      </div>
+      <div class="metrics" id="forecast-metrics">
+        <div class="metric">
+          <div class="metric-label">선택 구간 RMSE</div>
+          <div class="metric-value" id="sel-rmse">—</div>
+          <div class="metric-sub">MWh</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">연간 RMSE (TTM)</div>
+          <div class="metric-value">111</div>
+          <div class="metric-sub">MWh (92블록)</div>
+          <span class="metric-badge badge-green">canonical</span>
+        </div>
+        <div class="metric">
+          <div class="metric-label">기준선 (Seasonal)</div>
+          <div class="metric-value">107</div>
+          <div class="metric-sub">MWh</div>
+          <span class="metric-badge badge-blue">24h lag naive</span>
+        </div>
+        <div class="metric">
+          <div class="metric-label">1월 한파 RMSE</div>
+          <div class="metric-value">135</div>
+          <div class="metric-sub">MWh (TTM vs GRU 578)</div>
+          <span class="metric-badge badge-orange">강건성 확인</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">예측 vs 실측 차트</div>
+        <div class="card-sub" id="forecast-card-sub">TTM 96h one-shot 예측 — 2024년</div>
+        <div class="chart-wrap-lg" id="chart-forecast"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">잔차 분포</div>
+        <div class="card-sub">예측오차 = 실측 − 예측</div>
+        <div class="chart-wrap-sm" id="chart-residual"></div>
+      </div>
+    </div>
+
+    <!-- ④ 가설 검증 -->
+    <div id="page-hypothesis" class="page">
+      <div class="grid2">
+        <div class="card">
+          <div class="card-title">H1 — 기온×전력 U자 관계</div>
+          <div class="card-sub">
+            <span class="h-status h-confirmed">✓ 확인</span>
+            기준온 ~18°C에서 최소, 양방향 증가
+          </div>
+          <div class="chart-wrap" id="chart-scatter"></div>
+          <div style="margin-top:10px;font-size:12px;color:var(--muted)">
+            난방 구간(≤10°C) r = −0.38 &nbsp;|&nbsp; 냉방 구간(≥26°C) r = +0.18<br>
+            <strong>겨울 난방이 여름 냉방보다 강하게 반응</strong> — 초기 예상과 반대 방향
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">H2 — 지역별 기온 민감도</div>
+          <div class="card-sub">
+            <span class="h-status h-rejected">✗ 기각</span>
+            서울 slope 최소 — 발전소 없는 소비 전용 지역
+          </div>
+          <div class="chart-wrap" id="chart-slope"></div>
+          <div style="margin-top:10px;font-size:12px;color:var(--muted)">
+            부산 −32.4 MWh/°C (고리·신고리 원자력) &nbsp;|&nbsp; 서울 −0.04 MWh/°C<br>
+            <strong>KPX 거래량은 발전소 등록 기준 집계</strong> — 소비 전용 지역 불리
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">H3 — 평일 vs 주말 시간대별 패턴</div>
+        <div class="card-sub">
+          <span class="h-status h-confirmed">✓ 확인</span>
+          평일 16시 피크 611 MWh &nbsp;|&nbsp; 주말 510–540 MWh 완만
+        </div>
+        <div class="chart-wrap" id="chart-weekday"></div>
+      </div>
+    </div>
+
+    <!-- ⑤ 모델 비교 -->
+    <div id="page-model" class="page">
+      <div class="info-box green">
+        <strong>TTM 96h One-shot vs GRU roll</strong> —
+        연간 30% 낮은 RMSE (111 vs 159 MWh). 특히 이상기상(1월 한파·명절)에서 77% 낮음 (135 vs 578 MWh).
+        GRU는 96번 반복 예측 → 오차가 오차를 먹는 구조. TTM은 96h를 단 한 번에 예측.
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-title">연간 RMSE 비교 (92블록, 서울 2024)</div>
+          <div class="card-sub">낮을수록 우수 — canonical: model_compare_block_annual_verified.json</div>
+          <div class="chart-wrap" id="chart-model-bar"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">1월 라이브 테스트 (이상기상 구간)</div>
+          <div class="card-sub">한파·명절 포함 4블록 — 강건성 검증</div>
+          <div class="chart-wrap" id="chart-jan-bar"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">모델 성능 상세</div>
+        <div class="card-sub">서울 2024 연간 백테스트 (8,784h)</div>
+        <table id="model-table">
+          <thead><tr><th>모델</th><th>연간 RMSE</th><th>기준선 대비</th><th>상대 성능</th><th>비고</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Seasonal 24h (기준선)</td><td>107.2 MWh</td><td>—</td>
+              <td><div class="bar-cell"><div class="mini-bar" style="width:60px;background:#94a3b8"></div></td>
+              <td>Naive lag-24h</td>
+            </tr>
+            <tr style="background:#f0fdf4">
+              <td><strong>TTM 96h one-shot</strong></td><td><strong>111.5 MWh</strong></td><td>+4%</td>
+              <td><div class="bar-cell"><div class="mini-bar" style="width:62px;background:#22c55e"></div></td>
+              <td>✓ 이상기상 강건</td>
+            </tr>
+            <tr>
+              <td>GRU roll</td><td>158.9 MWh</td><td>+48%</td>
+              <td><div class="bar-cell"><div class="mini-bar" style="width:88px;background:#f97316"></div></td>
+              <td>오차 누적</td>
+            </tr>
+            <tr>
+              <td>Hybrid roll</td><td>167.1 MWh</td><td>+56%</td>
+              <td><div class="bar-cell"><div class="mini-bar" style="width:93px;background:#ef4444"></div></td>
+              <td>GRU 대체 불가</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ⑥ 서울 구별 -->
+    <div id="page-district" class="page">
+      <div class="info-box orange">
+        서울시 에너지통계(energyinfo.seoul.go.kr) 기반 <strong>실소비량</strong> 데이터.
+        KPX 거래량과 달리 발전소 영향이 없어 U자형 소비 패턴을 직접 확인할 수 있습니다.
+      </div>
+      <div class="card">
+        <div class="card-title">서울 25개 구 월별 에너지 사용량</div>
+        <div class="card-sub">단위: GWh/월 — 2019–2023 평균</div>
+        <div class="chart-wrap-lg" id="chart-district"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">에너지 상위·하위 자치구 비교</div>
+        <div class="card-sub">월별 합계 기준 연간 평균 사용량</div>
+        <div class="chart-wrap" id="chart-district-rank"></div>
+      </div>
+    </div>
+
+  <!-- ══ 과거 검증 페이지 ══ -->
+  <div class="page" id="page-backtest" style="display:none">
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">📊 모델 검증 근거 — 왜 미래 예측을 신뢰할 수 있는가?</div>
+      <div class="card-sub">TTM+GRU 모델이 2020~2024 실제 데이터에서 얼마나 잘 맞혔는지 검증한 결과입니다.</div>
+      <div style="margin-top:12px;padding:12px;background:#eff6ff;border-radius:8px;font-size:13px;line-height:1.7;color:#1e3a5f">
+        <strong>검증 구조:</strong>
+        <span style="margin-left:8px">2020~2023 학습 → 2024 <strong>완전 out-of-sample</strong> 블록 백테스트 (91블록 × 96h)</span><br>
+        <strong>핵심 결론:</strong>
+        <span style="margin-left:8px">2024년 8,784시간 예측에서 TTM RMSE <strong>111 MWh</strong> — 실측 대비 오차율 <strong>약 17%</strong></span><br>
+        <strong>미래 적용:</strong>
+        <span style="margin-left:8px">같은 모델로 2025~2027 시뮬레이션 → "과거에 이 정도 맞혔으니 미래도 이 범위 안에 들어올 확률이 높다"</span>
+      </div>
+    </div>
+
+    <div class="grid-2" style="align-items:start">
+      <div class="card">
+        <div class="card-title">연도별 RMSE 비교</div>
+        <div class="card-sub">낮을수록 예측 정확도 높음 (단위: MWh)</div>
+        <div id="backtest-chart" style="height:280px"></div>
+        <div style="margin-top:10px;font-size:11px;color:var(--muted);line-height:1.6" id="backtest-method-note"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">연도별 상세 수치</div>
+        <div class="card-sub">클릭하면 해당 연도 설명 표시</div>
+        <div id="backtest-table" style="font-size:13px"></div>
+        <div id="backtest-year-detail" style="margin-top:12px;padding:10px;background:#f8fafc;border-radius:8px;font-size:12px;color:#374151;display:none;line-height:1.6"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">Prophet+GRU 대비 우리 방식의 장점</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;font-size:13px">
+        <div style="padding:12px;background:#fef3c7;border-radius:8px;border-left:4px solid #f59e0b">
+          <div style="font-weight:700;margin-bottom:6px">❌ Prophet + GRU</div>
+          <ul style="margin:0;padding-left:16px;line-height:1.8;color:#78350f">
+            <li>Prophet이 추세·계절성 수동 분해</li>
+            <li>GRU가 잔차를 별도 학습 → 2단계 오차 누적</li>
+            <li>하이퍼파라미터 이중 튜닝 필요</li>
+            <li>기온 등 외부 변수 파이프라인 별도 필요</li>
+          </ul>
+        </div>
+        <div style="padding:12px;background:#dcfce7;border-radius:8px;border-left:4px solid #16a34a">
+          <div style="font-weight:700;margin-bottom:6px">✅ TTM (frozen) + GRU (우리)</div>
+          <ul style="margin:0;padding-left:16px;line-height:1.8;color:#14532d">
+            <li>TTM이 512h 패턴을 <strong>자동 임베딩</strong></li>
+            <li>GRU는 지역 특화 head만 학습 → 단순</li>
+            <li>기온 proxy(climatology)로 대체 가능</li>
+            <li>96h one-shot 예측 → 오차 누적 없음</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 실시간 예측 페이지 ══ -->
+  <div class="page" id="page-live-predict">
+    <div class="grid-2" style="align-items:start">
+
+      <!-- 인풋 패널 -->
+      <div class="card">
+        <div class="card-title">⚡ 실시간 예측 — 인풋</div>
+        <div class="card-sub">과거 데이터를 보여주면 AI가 다음 시점을 예측합니다</div>
+
+        <!-- 시나리오 연도 탭 -->
+        <div style="margin-top:16px">
+          <div style="display:flex;gap:4px;margin-bottom:10px" id="year-tabs">
+            <button class="year-tab active" onclick="setYearTab(this,'2025')">2025년</button>
+            <button class="year-tab" onclick="setYearTab(this,'2026')">2026년</button>
+            <button class="year-tab" onclick="setYearTab(this,'2027')">2027년</button>
+          </div>
+
+          <!-- 2025 -->
+          <div class="year-panel" id="panel-2025">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="scenario-btn future-btn" onclick="runScenario('winter_cold')">❄️ 겨울 한파</button>
+              <button class="scenario-btn future-btn" onclick="runScenario('holiday')">🏮 명절 연휴</button>
+              <button class="scenario-btn future-btn" onclick="runScenario('spring')">🌸 봄</button>
+              <button class="scenario-btn future-btn" onclick="runScenario('summer')">☀️ 여름 폭염</button>
+              <button class="scenario-btn future-btn" onclick="runScenario('year_end')">🎆 연말</button>
+            </div>
+          </div>
+
+          <!-- 2026 -->
+          <div class="year-panel" id="panel-2026" style="display:none">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="scenario-btn future-btn" onclick="runScenario('winter_2026')">❄️ 겨울 한파</button>
+              <button class="scenario-btn future-btn" onclick="runFuture('2026-04')">🌸 봄</button>
+              <button class="scenario-btn future-btn" onclick="runScenario('summer_2026')">☀️ 여름 폭염</button>
+              <button class="scenario-btn future-btn" onclick="runScenario('year_end_2026')">🎆 연말</button>
+            </div>
+          </div>
+
+          <!-- 2027 -->
+          <div class="year-panel" id="panel-2027" style="display:none">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="scenario-btn future-btn" onclick="runScenario('winter_2027')">❄️ 겨울 한파</button>
+              <button class="scenario-btn future-btn" onclick="runFuture('2027-04')">🌸 봄</button>
+              <button class="scenario-btn future-btn" onclick="runScenario('summer_2027')">☀️ 여름 폭염</button>
+              <button class="scenario-btn future-btn" onclick="runScenario('year_end_2027')">🎆 연말</button>
+            </div>
+          </div>
+
+          <p style="font-size:10px;color:var(--muted);margin-top:8px">
+            ※ 2024년까지만 실데이터 보유. 2025년 이후는 같은 계절 2024년 패턴을 컨텍스트로 시뮬레이션. 실측값은 아래 입력란에서 직접 비교 가능.
+          </p>
+        </div>
+
+        <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+          <p style="font-size:12px;color:var(--muted);margin-bottom:8px">또는 직접 날짜 입력</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;color:var(--muted)">컨텍스트 시작</label>
+              <input type="date" id="pred-ctx-start" value="2024-07-01"
+                     style="width:100%;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--muted)">컨텍스트 종료</label>
+              <input type="date" id="pred-ctx-end" value="2024-07-21"
+                     style="width:100%;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--muted)">예측 기준일</label>
+              <input type="date" id="pred-date" value="2024-07-22"
+                     style="width:100%;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px">
+            </div>
+          </div>
+          <button onclick="runCustomPredict()"
+                  style="margin-top:12px;width:100%;background:var(--blue);color:white;border:none;
+                         border-radius:8px;padding:10px;font-size:14px;font-weight:600;cursor:pointer">
+            🚀 예측 실행
+          </button>
+        </div>
+
+        <!-- 인풋 요약 카드 -->
+        <div id="predict-input-summary" style="display:none;margin-top:16px;padding:12px;background:#f8fafc;border-radius:8px;border:1px solid var(--border)">
+          <p style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">📥 INPUT (모델에 들어간 것)</p>
+          <table style="width:100%;font-size:12px;border-collapse:collapse" id="input-table"></table>
+        </div>
+      </div>
+
+      <!-- 아웃풋 패널 -->
+      <div class="card">
+        <div class="card-title">📤 아웃풋 — 예측 결과</div>
+        <div class="card-sub">TTM 임베딩 → GRU → 예측 전력거래량 (MWh)</div>
+
+        <div id="predict-loading" style="display:none;text-align:center;padding:40px;color:var(--muted)">
+          <div style="font-size:32px">⏳</div>
+          <p style="margin-top:8px">모델 로딩 중… (첫 실행은 10–20초 소요)</p>
+        </div>
+
+        <div id="predict-result" style="display:none">
+          <!-- 핵심 수치 -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:16px" id="result-kpis"></div>
+
+          <!-- 실측값 수동 입력 (미래 예측용) -->
+          <div id="manual-actual-box" style="margin-top:10px;padding:10px 14px;border-radius:8px;background:#f8fafc;border:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <span style="font-size:12px;color:var(--muted);white-space:nowrap">📋 실측값 직접 입력</span>
+            <input id="manual-actual-input" type="number" placeholder="예: 672.5" step="0.1"
+              style="width:100px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+            <span style="font-size:11px;color:var(--muted)">MWh (EPSIS·KPX 조회 후 입력)</span>
+            <button onclick="applyManualActual()"
+              style="padding:5px 12px;background:var(--blue);color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer">
+              비교하기
+            </button>
+            <span id="manual-actual-result" style="font-size:12px;font-weight:600"></span>
+          </div>
+
+          <!-- 해석 텍스트 -->
+          <div id="result-interpretation"
+               style="margin-top:12px;padding:12px;background:#eff6ff;border-radius:8px;border-left:4px solid var(--blue);
+                      font-size:13px;line-height:1.6;color:#1e40af"></div>
+
+          <!-- 모델 내부 -->
+          <div style="margin-top:12px;padding:12px;background:#fafafa;border-radius:8px;font-size:12px;color:var(--muted)">
+            <strong style="color:var(--text)">🧠 모델 내부 과정</strong>
+            <ol style="margin-top:6px;padding-left:18px;line-height:1.8" id="model-pipeline-steps"></ol>
+          </div>
+
+          <!-- 컨텍스트 차트 -->
+          <div style="margin-top:12px">
+            <p style="font-size:12px;color:var(--muted);margin-bottom:4px">컨텍스트 전력거래량 (입력 이력)</p>
+            <div id="chart-ctx-power" style="height:160px"></div>
+          </div>
+        </div>
+
+        <div id="predict-error" style="display:none;padding:20px;color:var(--red);font-size:13px"></div>
+      </div>
+    </div>
+
+    <!-- 전체 흐름 다이어그램 -->
+    <div class="card" style="margin-top:0">
+      <div class="card-title">🔄 INPUT → MODEL → OUTPUT 전체 흐름</div>
+      <div style="display:grid;grid-template-columns:1fr 48px 1fr 48px 1fr;gap:0;align-items:center;margin-top:16px">
+        <div style="background:#eff6ff;border:2px solid var(--blue);border-radius:10px;padding:16px;text-align:center">
+          <div style="font-size:24px">📥</div>
+          <div style="font-weight:700;margin:6px 0 4px;font-size:13px">INPUT</div>
+          <div style="font-size:11px;color:var(--muted);line-height:1.5">
+            과거 <strong>512시간</strong> (21일)<br>
+            전력거래량 + 기온<br>
+            시간·요일 피처
+          </div>
+        </div>
+        <div style="text-align:center;font-size:22px;color:var(--blue)">→</div>
+        <div style="background:#fff7ed;border:2px solid var(--orange);border-radius:10px;padding:16px;text-align:center">
+          <div style="font-size:24px">🧠</div>
+          <div style="font-weight:700;margin:6px 0 4px;font-size:13px">MODEL</div>
+          <div style="font-size:11px;color:var(--muted);line-height:1.5">
+            <strong>TTM (frozen)</strong><br>
+            → 192차원 임베딩<br>
+            + <strong>GRU head</strong><br>
+            → 96h 패턴 인식
+          </div>
+        </div>
+        <div style="text-align:center;font-size:22px;color:var(--orange)">→</div>
+        <div style="background:#f0fdf4;border:2px solid var(--green);border-radius:10px;padding:16px;text-align:center">
+          <div style="font-size:24px">📤</div>
+          <div style="font-weight:700;margin:6px 0 4px;font-size:13px">OUTPUT</div>
+          <div style="font-size:11px;color:var(--muted);line-height:1.5">
+            다음 시점<br>
+            <strong>예측 전력거래량</strong><br>
+            (MWh)<br>
+            + 실측 대비 오차
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<style>
+.scenario-btn {
+  background: white; border: 1px solid var(--border); border-radius: 20px;
+  padding: 6px 14px; font-size: 12px; cursor: pointer; transition: all .15s;
+}
+.scenario-btn:hover { background: var(--blue); color: white; border-color: var(--blue); }
+.future-btn { border-color: #a78bfa; color: #6d28d9; }
+.future-btn:hover { background: #7c3aed; border-color: #7c3aed; color: white; }
+.year-tab {
+  padding: 5px 14px; font-size: 12px; border-radius: 20px; cursor: pointer;
+  border: 1px solid var(--border); background: white; color: var(--muted); transition: all .15s;
+}
+.year-tab.active { background: #7c3aed; color: white; border-color: #7c3aed; font-weight: 600; }
+.kpi-box {
+  background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px; text-align: center;
+}
+.kpi-label { font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+.kpi-value { font-size: 22px; font-weight: 700; }
+.kpi-unit  { font-size: 11px; color: var(--muted); margin-top: 2px; }
+</style>
+
+<script>
+// ══════════════════════════════════════
+// Navigation
+// ══════════════════════════════════════
+const PAGE_TITLES = {
+  overview: '개요 대시보드',
+  history:  '시계열 탐색',
+  forecast: '예측 vs 실측 (2024)',
+  hypothesis: '가설 검증 결과',
+  model:    '모델 성능 비교',
+  district: '서울 자치구 에너지',
+  'live-predict': '⚡ 실시간 예측 데모',
+  backtest: '📊 과거 검증 (2020–2024)',
+};
+let currentPage = 'overview';
+
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => {
+    if (n.getAttribute('onclick').includes("'" + name + "'")) n.classList.add('active');
+  });
+  document.getElementById('page-title').textContent = PAGE_TITLES[name];
+  currentPage = name;
+  loadPage(name);
+}
+
+function onRegionChange() { if (currentPage !== 'overview') loadPage(currentPage); }
+function refreshAll() { loadPage(currentPage); }
+
+// ══════════════════════════════════════
+// Helpers
+// ══════════════════════════════════════
+const REGION_COLORS = { '서울시': '#0ea5e9', '부산시': '#f97316', '대전시': '#22c55e', '강원도': '#a78bfa' };
+const SEASON_COLORS = { '봄': '#74c476', '여름': '#e6550d', '가을': '#fd8d3c', '겨울': '#6baed6' };
+const NAVY = '#1e3a5f';
+
+function getCtrl() {
+  return {
+    region: document.getElementById('region-select').value,
+    start:  document.getElementById('start-date').value,
+    end:    document.getElementById('end-date').value,
+    resample: document.getElementById('resample-select').value,
+  };
+}
+
+async function api(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+const LAYOUT_BASE = {
+  margin: { t: 20, r: 20, b: 50, l: 60 },
+  font: { family: "'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif", size: 11 },
+  paper_bgcolor: 'white', plot_bgcolor: '#f8fafc',
+  hovermode: 'x unified',
+};
+function lay(extra) { return { ...LAYOUT_BASE, ...extra }; }
+const CFG = { displayModeBar: false, responsive: true };
+
+// ══════════════════════════════════════
+// Page loaders
+// ══════════════════════════════════════
+async function loadPage(name) {
+  try {
+    if (name === 'overview')      await loadOverview();
+    if (name === 'history')       await loadHistory();
+    if (name === 'forecast')      await loadForecast();
+    if (name === 'hypothesis')    await loadHypothesis();
+    if (name === 'model')         await loadModel();
+    if (name === 'district')      await loadDistrict();
+    if (name === 'live-predict')  { /* 버튼 클릭 시 실행 */ }
+    if (name === 'backtest')      await loadBacktest();
+  } catch(e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════
+// ═══════════════════════════════════════
+// 과거 검증 탭
+// ═══════════════════════════════════════
+let _backtestData = null;
+
+async function loadBacktest() {
+  if (_backtestData) return;
+  const r = await fetch('/api/backtest');
+  _backtestData = await r.json();
+  renderBacktest(_backtestData);
+}
+
+function renderBacktest(data) {
+  const years = Object.keys(data.years).map(Number).sort();
+  const methodLabel = { block_backtest_91: '블록 백테스트 (91블록)', year_roll_forward: 'Roll-forward', monthly_spot_check: '월별 spot check' };
+  const methodColor = { block_backtest_91: '#16a34a', year_roll_forward: '#2563eb', monthly_spot_check: '#9ca3af' };
+
+  // ── 차트 (Plotly)
+  const traces = [];
+  const hybridRmse = years.map(y => data.years[y].hybrid);
+  const gruRmse    = years.map(y => data.years[y].gru);
+  const ttmRmse    = years.map(y => data.years[y].ttm);
+
+  traces.push({ name: 'TTM+GRU (Hybrid)', x: years, y: hybridRmse, type: 'bar', marker: { color: '#7c3aed' } });
+  if (gruRmse.some(v => v != null))
+    traces.push({ name: 'GRU-only', x: years, y: gruRmse, type: 'bar', marker: { color: '#f59e0b' } });
+  if (ttmRmse.some(v => v != null))
+    traces.push({ name: 'TTM one-shot', x: years, y: ttmRmse, type: 'bar', marker: { color: '#2563eb' } });
+
+  Plotly.newPlot('backtest-chart', traces, {
+    barmode: 'group',
+    yaxis: { title: 'RMSE (MWh)', zeroline: true },
+    xaxis: { tickvals: years, ticktext: years.map(String) },
+    margin: { t: 10, b: 40, l: 55, r: 10 },
+    legend: { orientation: 'h', y: -0.2 },
+    plot_bgcolor: '#f8fafc', paper_bgcolor: '#f8fafc',
+  }, { responsive: true, displayModeBar: false });
+
+  // 검증 방법 안내
+  document.getElementById('backtest-method-note').innerHTML =
+    `<strong>신뢰도 순위:</strong> 🟢 2024 블록 백테스트(91블록) > 🔵 2022 roll-forward > 🔘 2020/2021/2023 spot check<br>
+     <em>2024 수치가 가장 엄격한 out-of-sample 평가입니다.</em>`;
+
+  // ── 테이블
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr style="background:#f1f5f9;font-weight:600">
+      <th style="padding:6px 8px;text-align:left">연도</th>
+      <th style="padding:6px 8px;text-align:right">Hybrid RMSE</th>
+      <th style="padding:6px 8px;text-align:right">GRU</th>
+      <th style="padding:6px 8px;text-align:right">TTM</th>
+      <th style="padding:6px 8px;text-align:left">신뢰도</th>
+    </tr>`;
+  years.forEach(y => {
+    const v = data.years[y];
+    const mc = methodColor[v.method] || '#9ca3af';
+    const ml = methodLabel[v.method] || v.method;
+    const isKey = v.method === 'block_backtest_91';
+    html += `<tr style="border-bottom:1px solid #e5e7eb;cursor:pointer;${isKey?'background:#f0fdf4':''}"
+               onclick="showYearDetail(${y})">
+      <td style="padding:6px 8px;font-weight:${isKey?700:400}">${y}${isKey?' ⭐':''}</td>
+      <td style="padding:6px 8px;text-align:right;font-weight:700;color:#7c3aed">${v.hybrid ?? '—'}</td>
+      <td style="padding:6px 8px;text-align:right;color:#f59e0b">${v.gru ?? '—'}</td>
+      <td style="padding:6px 8px;text-align:right;color:#2563eb">${v.ttm ?? '—'}</td>
+      <td style="padding:6px 8px"><span style="background:${mc}20;color:${mc};border:1px solid ${mc};border-radius:10px;padding:2px 7px;font-size:10px">${ml}</span></td>
+    </tr>`;
+  });
+  html += '</table>';
+  document.getElementById('backtest-table').innerHTML = html;
+}
+
+function showYearDetail(year) {
+  const v = _backtestData.years[year];
+  const interp = _backtestData.interpretation;
+  const noteKey = Object.keys(interp).find(k => k.includes(String(year)));
+  const noteText = noteKey ? interp[noteKey] : v.note;
+  const detail = document.getElementById('backtest-year-detail');
+  detail.style.display = 'block';
+  detail.innerHTML = `<strong>${year}년 상세</strong><br>
+    방법: ${v.method}<br>
+    평가 포인트: ${v.hours}${v.method==='monthly_spot_check'?'회':'시간'}<br>
+    Hybrid RMSE: <strong>${v.hybrid ?? '—'} MWh</strong>${v.gru ? ` | GRU: ${v.gru}` : ''}${v.ttm ? ` | TTM: ${v.ttm}` : ''}<br>
+    <em style="color:var(--muted)">${noteText}</em>`;
+}
+
+// ═══════════════════════════════════════
+// 실시간 예측 탭
+// ═══════════════════════════════════════
+let _lastPredMwh = null;
+
+function setYearTab(btn, year) {
+  document.querySelectorAll('.year-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.year-panel').forEach(p => p.style.display = 'none');
+  document.getElementById('panel-' + year).style.display = 'block';
+}
+
+function applyManualActual() {
+  const val = parseFloat(document.getElementById('manual-actual-input').value);
+  if (isNaN(val) || val <= 0) {
+    document.getElementById('manual-actual-result').textContent = '⚠ 올바른 숫자를 입력하세요';
+    document.getElementById('manual-actual-result').style.color = 'var(--orange)';
+    return;
+  }
+  if (_lastPredMwh == null) {
+    document.getElementById('manual-actual-result').textContent = '먼저 예측을 실행하세요';
+    return;
+  }
+  const err = _lastPredMwh - val;
+  const errPct = Math.abs(err / val * 100).toFixed(1);
+  const color = errPct < 5 ? 'var(--green)' : errPct < 15 ? 'var(--orange)' : 'var(--red)';
+  const dir = err > 0 ? '과다 예측' : '과소 예측';
+  document.getElementById('manual-actual-result').innerHTML =
+    `예측 ${_lastPredMwh} vs 실측 ${val} MWh → <span style="color:${color}">오차 ${err > 0 ? '+' : ''}${err.toFixed(1)} MWh (${errPct}%, ${dir})</span>`;
+
+  // KPI 박스 실측값도 갱신
+  const kpis = document.getElementById('result-kpis');
+  const boxes = kpis.querySelectorAll('.kpi-box');
+  if (boxes[1]) {
+    boxes[1].querySelector('.kpi-value').textContent = val;
+    boxes[1].querySelector('.kpi-label').textContent = '실측 (수동 입력)';
+  }
+  if (boxes[2]) {
+    const errColor = errPct < 15 ? 'var(--green)' : errPct < 30 ? 'var(--orange)' : 'var(--red)';
+    boxes[2].querySelector('.kpi-value').style.color = errColor;
+    boxes[2].querySelector('.kpi-value').textContent = `${err > 0 ? '+' : ''}${err.toFixed(1)}`;
+    boxes[2].querySelector('.kpi-label').textContent = `오차 (${errPct}%)`;
+  }
+}
+
+async function runFuture(yearMonth) {
+  const [year, month] = yearMonth.split('-').map(Number);
+  const pad = n => String(n).padStart(2,'0');
+  // 컨텍스트: 해당 월 1~21일, 예측: 22일
+  const ctxStart = `${year}-${pad(month)}-01`;
+  const ctxEnd   = `${year}-${pad(month)}-21`;
+  const predDate = `${year}-${pad(month)}-22`;
+  document.getElementById('pred-ctx-start').value = ctxStart;
+  document.getElementById('pred-ctx-end').value   = ctxEnd;
+  document.getElementById('pred-date').value      = predDate;
+  const url = `/api/predict?ctx_start=${encodeURIComponent(ctxStart)}&ctx_end=${encodeURIComponent(ctxEnd + ' 23:00:00')}&pred_date=${predDate}`;
+  await callPredict(url);
+}
+
+async function runScenario(scenario) {
+  const scenarios = {
+    summer:      { ctx_start:'2024-07-01', ctx_end:'2024-07-21', pred_date:'2024-07-22' },
+    winter_cold: { ctx_start:'2024-01-01', ctx_end:'2024-01-21', pred_date:'2024-01-22' },
+    holiday:     { ctx_start:'2024-01-07', ctx_end:'2024-01-27', pred_date:'2024-01-28' },
+    spring:      { ctx_start:'2024-04-01', ctx_end:'2024-04-21', pred_date:'2024-04-22' },
+    year_end:    { ctx_start:'2024-12-01', ctx_end:'2024-12-21', pred_date:'2024-12-22' },
+  };
+  const s = scenarios[scenario];
+  if (!s) return;
+  document.getElementById('pred-ctx-start').value = s.ctx_start;
+  document.getElementById('pred-ctx-end').value   = s.ctx_end;
+  document.getElementById('pred-date').value      = s.pred_date;
+  await callPredict(`/api/predict?scenario=${scenario}`);
+}
+
+async function runCustomPredict() {
+  const ctxStart = document.getElementById('pred-ctx-start').value;
+  const ctxEnd   = document.getElementById('pred-ctx-end').value;
+  const predDate = document.getElementById('pred-date').value;
+  if (!ctxStart || !ctxEnd) { alert('시작/종료 날짜를 입력하세요'); return; }
+  const url = `/api/predict?ctx_start=${ctxStart}&ctx_end=${ctxEnd} 23:00:00&pred_date=${predDate || ''}`;
+  await callPredict(url);
+}
+
+async function callPredict(url) {
+  const loading = document.getElementById('predict-loading');
+  const result  = document.getElementById('predict-result');
+  const errDiv  = document.getElementById('predict-error');
+  const summary = document.getElementById('predict-input-summary');
+
+  loading.style.display = 'block';
+  result.style.display  = 'none';
+  errDiv.style.display  = 'none';
+  summary.style.display = 'none';
+
+  try {
+    const data = await api(url);
+    loading.style.display = 'none';
+    renderPredictResult(data);
+  } catch(e) {
+    loading.style.display = 'none';
+    errDiv.style.display  = 'block';
+    errDiv.textContent    = `오류: ${e.message || e}`;
+  }
+}
+
+function renderPredictResult(data) {
+  const inp = data.input;
+  const out = data.output;
+  const mdl = data.model;
+  const ins = data.insight || {};
+  const sim = data.simulation;
+
+  // 마지막 예측값 저장 (실측 수동 입력 비교용)
+  _lastPredMwh = out.pred_mwh;
+  document.getElementById('manual-actual-input').value = '';
+  document.getElementById('manual-actual-result').textContent = '';
+  // 미래 모드면 입력박스 강조
+  document.getElementById('manual-actual-box').style.background = (sim && sim.future_mode) ? '#fefce8' : '#f8fafc';
+  document.getElementById('manual-actual-box').style.borderColor = (sim && sim.future_mode) ? '#fde047' : 'var(--border)';
+
+  // ── 미래 시뮬레이션 배너
+  const existingBanner = document.getElementById('sim-banner');
+  if (existingBanner) existingBanner.remove();
+  if (sim && sim.future_mode && sim.note) {
+    const banner = document.createElement('div');
+    banner.id = 'sim-banner';
+    banner.style.cssText = `
+      margin-bottom:12px;padding:10px 14px;border-radius:8px;
+      background:#fefce8;border:1px solid #fde047;
+      font-size:12px;color:#713f12;line-height:1.5;
+    `;
+    banner.innerHTML = `
+      <strong>🔮 미래 예측 시뮬레이션 모드</strong><br>
+      ${sim.note}<br>
+      <span style="color:#92400e">실측 비교 없이 모델 예측값만 표시됩니다. 계절 패턴이 반복된다는 가정 하의 참고용 수치입니다.</span>
+    `;
+    document.getElementById('predict-result').prepend(banner);
+  }
+
+  // ── INPUT 요약 테이블
+  const inputTable = document.getElementById('input-table');
+  const inputRows = [
+    ['컨텍스트 기간', `${inp.context_start} ~ ${inp.context_end}`],
+    ['시간 수',      `${inp.context_hours}h (${inp.context_days}일)`],
+    ['전력 평균',    `${inp.avg_power_mwh} MWh`],
+    ['기온 평균',    `${inp.avg_temp_c}°C`],
+    ['전력 최대',    `${inp.max_power_mwh} MWh`],
+  ];
+  inputTable.innerHTML = inputRows.map(([k,v]) =>
+    `<tr><td style="color:var(--muted);padding:3px 0;width:40%">${k}</td>
+         <td style="font-weight:600;padding:3px 0">${v}</td></tr>`
+  ).join('');
+  document.getElementById('predict-input-summary').style.display = 'block';
+
+  // ── Alert 배지 + 헤드라인
+  const alertMeta = {
+    warning: { color: '#ef4444', bg: '#fef2f2', icon: '🔴', text: 'WARNING' },
+    caution: { color: '#f97316', bg: '#fff7ed', icon: '🟡', text: 'CAUTION' },
+    normal:  { color: '#22c55e', bg: '#f0fdf4', icon: '🟢', text: 'NORMAL'  },
+  };
+  const dirIcon = { up: '↑', down: '↓', stable: '→' };
+  const am = alertMeta[ins.alert_level] || alertMeta.normal;
+
+  // ── KPI 박스 (3개)
+  const errColor = out.error_pct != null ? (out.error_pct < 15 ? 'var(--green)' : out.error_pct < 30 ? 'var(--orange)' : 'var(--red)') : 'var(--muted)';
+  document.getElementById('result-kpis').innerHTML = `
+    <div class="kpi-box" style="border-top:3px solid var(--blue)">
+      <div class="kpi-label">예측 전력거래량</div>
+      <div class="kpi-value" style="color:var(--blue)">${out.pred_mwh}</div>
+      <div class="kpi-unit">MWh</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px">${ins.compare_to_avg ?? ''}</div>
+    </div>
+    <div class="kpi-box" style="border-top:3px solid var(--navy)">
+      <div class="kpi-label">실측 (당일 평균)</div>
+      <div class="kpi-value" style="color:var(--navy)">${out.actual_day_avg_mwh ?? '—'}</div>
+      <div class="kpi-unit">MWh</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px">${ins.compare_to_ctx ?? ''}</div>
+    </div>
+    <div class="kpi-box" style="border-top:3px solid ${errColor}">
+      <div class="kpi-label">예측 오차</div>
+      <div class="kpi-value" style="color:${errColor}">${out.error_mwh ?? '—'}</div>
+      <div class="kpi-unit">${out.error_pct != null ? out.error_pct + '%' : 'MWh'}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px">${out.error_pct != null && out.error_pct < 10 ? '✅ 매우 정확' : out.error_pct != null && out.error_pct < 20 ? '✅ 양호' : '참고용 (단일 스텝)'}</div>
+    </div>
+  `;
+
+  // ── 인사이트 섹션 (전체)
+  document.getElementById('result-interpretation').innerHTML = `
+    <!-- 알림 배지 + 헤드라인 -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <span style="background:${am.bg};color:${am.color};border:1px solid ${am.color};
+                   border-radius:20px;padding:3px 12px;font-size:11px;font-weight:700;white-space:nowrap">
+        ${am.icon} ${am.text}
+      </span>
+      <span style="font-size:14px;font-weight:700;color:var(--navy)">
+        ${dirIcon[ins.demand_direction] ?? ''} ${ins.headline ?? ''}
+      </span>
+    </div>
+
+    <!-- 상황 설명 -->
+    <div style="font-size:13px;color:#374151;line-height:1.6;margin-bottom:12px;padding:10px 12px;
+                background:#f9fafb;border-radius:8px;border-left:3px solid ${am.color}">
+      ${ins.situation ?? out.interpretation ?? ''}
+    </div>
+
+    <!-- 정책 행동 체크리스트 -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px">지금 해야 할 것</div>
+      <ul style="list-style:none;padding:0;display:flex;flex-direction:column;gap:5px">
+        ${(ins.policy_actions || []).map(a => `
+          <li style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:#374151;
+                     padding:6px 10px;background:#f8fafc;border-radius:6px">
+            <span style="color:${am.color};font-size:14px;flex-shrink:0">☑</span>
+            <span>${a}</span>
+          </li>
+        `).join('')}
+      </ul>
+    </div>
+
+    <!-- 이점 + 위험 2단 카드 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div style="padding:10px 12px;background:#f0fdf4;border-radius:8px;border:1px solid #86efac">
+        <div style="font-size:11px;font-weight:700;color:#15803d;margin-bottom:4px">✅ 이 예측을 활용하면</div>
+        <div style="font-size:12px;color:#166534;line-height:1.5">${ins.benefit ?? ''}</div>
+      </div>
+      <div style="padding:10px 12px;background:#fef2f2;border-radius:8px;border:1px solid #fca5a5">
+        <div style="font-size:11px;font-weight:700;color:#dc2626;margin-bottom:4px">⚠️ 무시하면</div>
+        <div style="font-size:12px;color:#991b1b;line-height:1.5">${ins.risk_if_ignored ?? ''}</div>
+      </div>
+    </div>
+
+    <!-- 실제 데이터 근거 -->
+    ${ins.real_example ? `
+    <div style="font-size:11px;color:var(--muted);padding:6px 10px;background:#f8fafc;
+                border-radius:6px;border-left:3px solid var(--blue)">
+      📊 데이터 근거: ${ins.real_example}
+    </div>` : ''}
+  `;
+
+  // ── 모델 내부 단계 (간략화)
+  document.getElementById('model-pipeline-steps').innerHTML = [
+    `컨텍스트 ${inp.context_hours}h (전력 평균 ${inp.avg_power_mwh} MWh, 기온 평균 ${inp.avg_temp_c}°C) 로드`,
+    `TTM-r2 (frozen) → 512h 패턴을 192차원 임베딩으로 압축 (L2 norm: ${mdl.ttm_emb_l2norm})`,
+    `시간·요일 피처 8차원 + 임베딩 → 2층 GRU (hidden=64)`,
+    `스케일 역변환 → <strong>${out.pred_mwh} MWh</strong>  (실측: ${out.actual_day_avg_mwh ?? '알 수 없음'} MWh)`,
+  ].map(s => `<li style="padding:3px 0">${s}</li>`).join('');
+
+  // ── 컨텍스트 차트
+  const ctxStart = inp.context_start;
+  const ctxEnd   = inp.context_end;
+  api(`/api/forecast?region=서울시&start=${ctxStart}&end=${ctxEnd}`).then(fc => {
+    if (!fc.timestamps) return;
+    const traces = [];
+    if (fc.actual)    traces.push({x: fc.timestamps, y: fc.actual,    name:'실측', line:{color:'#64748b',width:1.5}});
+    if (fc.predicted) traces.push({x: fc.timestamps, y: fc.predicted, name:'기존 예측', line:{color:'#0ea5e9',width:1,dash:'dot'}});
+    if (out.pred_date) traces.push({
+      x: [out.pred_date + 'T00:00:00'],
+      y: [out.pred_mwh],
+      mode:'markers+text', text:[`← ${out.pred_mwh} MWh`], textposition:'middle right',
+      textfont:{size:11, color:'#f97316'},
+      marker:{color:'#f97316', size:14, symbol:'star'},
+      name:`AI 예측 결과`
+    });
+    Plotly.newPlot('chart-ctx-power', traces, {
+      margin:{t:10,b:30,l:50,r:10}, height:170,
+      legend:{orientation:'h', y:-0.35, font:{size:10}},
+      yaxis:{title:'MWh', tickfont:{size:10}},
+      xaxis:{tickfont:{size:9}},
+      shapes: out.pred_date ? [{
+        type:'line', x0:out.pred_date+'T00:00:00', x1:out.pred_date+'T00:00:00',
+        y0:0, y1:1, yref:'paper', line:{color:'#f97316', width:1.5, dash:'dot'}
+      }] : [],
+    }, {responsive:true, displayModeBar:false});
+  }).catch(() => {});
+
+  document.getElementById('predict-result').style.display = 'block';
+}
+
+// ─── Overview ───────────────────────────────
+async function loadOverview() {
+  // Region bar chart
+  const sens = await api('/api/sensitivity');
+  const regionBarData = [{
+    type: 'bar',
+    x: sens.regions,
+    y: sens.mean_power,
+    marker: { color: sens.regions.map(r => REGION_COLORS[r] || NAVY) },
+    text: sens.mean_power.map(v => v.toFixed(0) + ' MWh'),
+    textposition: 'outside',
+  }];
+  Plotly.react('chart-region-bar', regionBarData,
+    lay({ yaxis: { title: 'MWh/시간' }, showlegend: false }), CFG);
+
+  // Monthly pattern (Seoul)
+  const hist = await api('/api/history?region=서울시&start=2020-01-01&end=2024-12-31&resample=1ME');
+  const monthlyTrace = [{
+    type: 'scatter', mode: 'lines+markers',
+    x: hist.timestamps, y: hist.power,
+    line: { color: '#0ea5e9', width: 2 },
+    fill: 'tozeroy', fillcolor: 'rgba(14,165,233,0.07)',
+    name: '서울 전력거래량',
+  }];
+  Plotly.react('chart-monthly', monthlyTrace,
+    lay({ yaxis: { title: 'MWh' } }), CFG);
+}
+
+// ─── History ────────────────────────────────
+async function loadHistory() {
+  const c = getCtrl();
+  const d = await api(`/api/history?region=${encodeURIComponent(c.region)}&start=${c.start}&end=${c.end}&resample=${c.resample}`);
+
+  const traces = [
+    {
+      type: 'scatter', mode: 'lines',
+      x: d.timestamps, y: d.power,
+      name: '전력거래량 (MWh)', yaxis: 'y',
+      line: { color: REGION_COLORS[c.region] || NAVY, width: 1.5 },
+    },
+    {
+      type: 'scatter', mode: 'lines',
+      x: d.timestamps, y: d.temp,
+      name: '기온 (°C)', yaxis: 'y2',
+      line: { color: '#f97316', width: 1, dash: 'dot' },
+    },
+  ];
+  Plotly.react('chart-history', traces, lay({
+    yaxis: { title: '전력거래량 (MWh)' },
+    yaxis2: { title: '기온 (°C)', overlaying: 'y', side: 'right', showgrid: false },
+    legend: { orientation: 'h', x: 0, y: 1.05 },
+  }), CFG);
+
+  // Hourly avg (use full date range)
+  const full = await api(`/api/history?region=${encodeURIComponent(c.region)}&resample=1h`);
+  const hourBucket = Array(24).fill(0);
+  const hourCount  = Array(24).fill(0);
+  full.timestamps.forEach((t, i) => {
+    const h = new Date(t).getHours();
+    hourBucket[h] += full.power[i];
+    hourCount[h]  += 1;
+  });
+  const hourAvg = hourBucket.map((s, i) => hourCount[i] > 0 ? +(s / hourCount[i]).toFixed(1) : 0);
+  Plotly.react('chart-hourly-avg', [{
+    type: 'bar', x: Array.from({length:24},(_,i)=>i+'시'), y: hourAvg,
+    marker: { color: hourAvg.map((v,i) => i>=9&&i<=18 ? '#0ea5e9' : '#94a3b8') },
+    text: hourAvg.map(v=>v.toFixed(0)), textposition: 'outside',
+  }], lay({ yaxis: { title: 'MWh' }, showlegend: false }), CFG);
+
+  // Monthly avg
+  const monthBucket = Array(12).fill(0);
+  const monthCount  = Array(12).fill(0);
+  full.timestamps.forEach((t, i) => {
+    const m = new Date(t).getMonth();
+    monthBucket[m] += full.power[i];
+    monthCount[m]  += 1;
+  });
+  const monthAvg = monthBucket.map((s,i) => monthCount[i]>0 ? +(s/monthCount[i]).toFixed(1) : 0);
+  const mLabels = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+  Plotly.react('chart-monthly-avg', [{
+    type: 'bar', x: mLabels, y: monthAvg,
+    marker: { color: ['#6baed6','#6baed6','#74c476','#74c476','#74c476','#e6550d','#e6550d','#e6550d','#fd8d3c','#74c476','#6baed6','#6baed6'] },
+    text: monthAvg.map(v=>v.toFixed(0)), textposition: 'outside',
+  }], lay({ yaxis: { title: 'MWh' }, showlegend: false }), CFG);
+}
+
+// ─── Forecast ───────────────────────────────
+async function loadForecast() {
+  const c = getCtrl();
+  const d = await api(`/api/forecast?region=${encodeURIComponent(c.region)}&start=${c.start}&end=${c.end}`);
+
+  document.getElementById('sel-rmse').textContent = d.rmse ? d.rmse.toFixed(1) : '—';
+  document.getElementById('forecast-card-sub').textContent =
+    `TTM 96h one-shot 예측 — ${c.region} ${c.start}~${c.end}`;
+
+  const traces = [];
+  if (d.actual) traces.push({
+    type: 'scatter', mode: 'lines', name: '실측',
+    x: d.timestamps, y: d.actual,
+    line: { color: NAVY, width: 1.2 },
+  });
+  if (d.predicted) traces.push({
+    type: 'scatter', mode: 'lines', name: 'TTM 예측',
+    x: d.timestamps, y: d.predicted,
+    line: { color: '#0ea5e9', width: 1.5, dash: 'dash' },
+  });
+  Plotly.react('chart-forecast', traces,
+    lay({ yaxis: { title: 'MWh' }, legend: { orientation: 'h', x: 0, y: 1.08 } }), CFG);
+
+  // Residual
+  if (d.actual && d.predicted) {
+    const resid = d.actual.map((a, i) => a - d.predicted[i]);
+    Plotly.react('chart-residual', [{
+      type: 'histogram', x: resid, nbinsx: 60,
+      marker: { color: '#0ea5e9', opacity: 0.75 },
+      name: '잔차',
+    }], lay({ xaxis: { title: '잔차 (MWh)' }, yaxis: { title: '빈도' }, showlegend: false }), CFG);
+  }
+}
+
+// ─── Hypothesis ─────────────────────────────
+async function loadHypothesis() {
+  const c = getCtrl();
+
+  // H1 scatter
+  const sc = await api(`/api/temp-scatter?region=${encodeURIComponent(c.region)}&sample=3000`);
+  const seasonGroups = {};
+  sc.season.forEach((s, i) => {
+    if (!seasonGroups[s]) seasonGroups[s] = { temp: [], power: [] };
+    seasonGroups[s].temp.push(sc.temp[i]);
+    seasonGroups[s].power.push(sc.power[i]);
+  });
+  const scatterTraces = Object.entries(seasonGroups).map(([s, v]) => ({
+    type: 'scatter', mode: 'markers', name: s,
+    x: v.temp, y: v.power,
+    marker: { color: SEASON_COLORS[s] || '#888', size: 4, opacity: 0.55 },
+  }));
+  Plotly.react('chart-scatter', scatterTraces,
+    lay({ xaxis: { title: '기온 (°C)' }, yaxis: { title: 'MWh' }, showlegend: true,
+          legend: { orientation: 'h', x: 0, y: 1.05 } }), CFG);
+
+  // H2 slope bar
+  const sens = await api('/api/sensitivity');
+  const colors = sens.slope_temp_power.map(v => v < 0 ? '#ef4444' : '#22c55e');
+  Plotly.react('chart-slope', [{
+    type: 'bar', x: sens.regions, y: sens.slope_temp_power,
+    marker: { color: colors },
+    text: sens.slope_temp_power.map(v => v.toFixed(2)),
+    textposition: 'outside',
+  }], lay({ yaxis: { title: 'MWh/°C' }, showlegend: false,
+            shapes: [{ type: 'line', x0: -0.5, x1: 3.5, y0: 0, y1: 0,
+                       line: { color: '#94a3b8', dash: 'dot' } }] }), CFG);
+
+  // H3 weekday
+  const wp = await api(`/api/weekday-pattern?region=${encodeURIComponent(c.region)}`);
+  Plotly.react('chart-weekday', [
+    { type: 'scatter', mode: 'lines', name: '평일',
+      x: wp.hours, y: wp.weekday,
+      line: { color: NAVY, width: 2.5 },
+      fill: 'tozeroy', fillcolor: 'rgba(30,58,95,0.06)' },
+    { type: 'scatter', mode: 'lines', name: '주말',
+      x: wp.hours, y: wp.weekend,
+      line: { color: '#f97316', width: 2.5, dash: 'dash' } },
+  ], lay({
+    xaxis: { title: '시간대', tickmode: 'array', tickvals: Array.from({length:24},(_,i)=>i),
+             ticktext: Array.from({length:24},(_,i)=>i+'시') },
+    yaxis: { title: 'MWh' },
+    legend: { orientation: 'h', x: 0, y: 1.08 },
+    shapes: [
+      { type: 'rect', x0: 9, x1: 18, y0: 0, y1: 1, yref: 'paper',
+        fillcolor: 'rgba(14,165,233,0.08)', line: { width: 0 } },
+    ],
+  }), CFG);
+}
+
+// ─── Model ──────────────────────────────────
+async function loadModel() {
+  const mc = await api('/api/model-comparison');
+
+  // Annual RMSE bar
+  const barColors = mc.annual.labels.map(l =>
+    l.includes('TTM') ? '#22c55e' : l.includes('Seasonal') ? '#94a3b8' : '#f97316'
+  );
+  Plotly.react('chart-model-bar', [{
+    type: 'bar', x: mc.annual.labels, y: mc.annual.rmse,
+    marker: { color: barColors },
+    text: mc.annual.rmse.map(v => v.toFixed(1) + ' MWh'), textposition: 'outside',
+  }], lay({
+    yaxis: { title: 'RMSE (MWh)' }, showlegend: false,
+    shapes: [{ type: 'line', x0: -0.5, x1: mc.annual.labels.length - 0.5,
+               y0: mc.seasonal_baseline, y1: mc.seasonal_baseline,
+               line: { color: '#94a3b8', dash: 'dot', width: 1.5 } }],
+    annotations: [{ x: mc.annual.labels.length - 1, y: mc.seasonal_baseline + 3,
+                    text: '기준선 ' + mc.seasonal_baseline + ' MWh',
+                    showarrow: false, font: { size: 10, color: '#64748b' } }],
+  }), CFG);
+
+  // Jan live bar
+  const janKeys = Object.keys(mc.jan_live);
+  const janVals = Object.values(mc.jan_live);
+  const janColors = janKeys.map(k => k.includes('ttm') ? '#22c55e' : '#f97316');
+  Plotly.react('chart-jan-bar', [{
+    type: 'bar',
+    x: janKeys.map(k => k.replace('_block','').replace('_',' ')),
+    y: janVals,
+    marker: { color: janColors },
+    text: janVals.map(v => v.toFixed(1)), textposition: 'outside',
+  }], lay({ yaxis: { title: 'RMSE (MWh)' }, showlegend: false }), CFG);
+}
+
+// ─── District ───────────────────────────────
+async function loadDistrict() {
+  const dm = await api('/api/district-monthly');
+  const mLabels = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+
+  // Top 5 + Bottom 5 districts by annual total
+  const totals = {};
+  dm.districts.forEach(d => {
+    totals[d] = dm.usage_gwh[d].reduce((a, b) => a + b, 0);
+  });
+  const sorted = dm.districts.slice().sort((a, b) => totals[b] - totals[a]);
+  const top5 = sorted.slice(0, 5);
+  const bot5 = sorted.slice(-5);
+  const show = [...top5, ...bot5];
+
+  const palette = ['#0ea5e9','#22c55e','#f97316','#a78bfa','#ef4444',
+                   '#94a3b8','#cbd5e1','#d1d5db','#6b7280','#9ca3af'];
+  const traces = show.map((d, i) => ({
+    type: 'scatter', mode: 'lines+markers', name: d,
+    x: mLabels, y: dm.usage_gwh[d],
+    line: { color: palette[i % palette.length], width: i < 5 ? 2 : 1 },
+    opacity: i < 5 ? 1 : 0.5,
+  }));
+  Plotly.react('chart-district', traces,
+    lay({ yaxis: { title: 'GWh/월' }, legend: { orientation: 'h', x: 0, y: 1.08 } }), CFG);
+
+  // Rank bar
+  const top10 = sorted.slice(0, 10);
+  Plotly.react('chart-district-rank', [{
+    type: 'bar', orientation: 'h',
+    x: top10.map(d => +totals[d].toFixed(2)).reverse(),
+    y: top10.map(d => d).reverse(),
+    marker: { color: '#0ea5e9' },
+    text: top10.map(d => totals[d].toFixed(1) + ' GWh').reverse(),
+    textposition: 'outside',
+  }], lay({ xaxis: { title: 'GWh/년' }, margin: { ...LAYOUT_BASE.margin, l: 70 }, showlegend: false }), CFG);
+}
+
+// ══════════════════════════════════════
+// Init
+// ══════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => loadPage('overview'));
+</script>
+</body>
+</html>

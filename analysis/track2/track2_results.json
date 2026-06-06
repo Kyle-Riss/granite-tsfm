@@ -1,0 +1,23 @@
+{
+  "max_district": "강남구",
+  "max_usage_million_mwh": 4.65,
+  "min_district": "강북구",
+  "min_usage_million_mwh": 0.84,
+  "ratio_max_min": 5.5,
+  "max_per_capita_district": "중구",
+  "u_min_temp_actual_consumption": 9.5,
+  "monthly_temp": {
+    "1": -2.7,
+    "2": 0.1,
+    "3": 5.8,
+    "4": 11.9,
+    "5": 16.5,
+    "6": 21.9,
+    "7": 25.0,
+    "8": 25.4,
+    "9": 21.3,
+    "10": 13.4,
+    "11": 6.5,
+    "12": -1.9
+  }
+}

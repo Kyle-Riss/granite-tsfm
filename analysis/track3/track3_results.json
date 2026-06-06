@@ -1,0 +1,34 @@
+{
+  "annual_rmse": {
+    "seasonal_24h": 107.2,
+    "ttm_96h_oneshot": 111.5,
+    "gru_roll": 158.9,
+    "hybrid_roll": 167.1
+  },
+  "jan_live_rmse": {
+    "ttm_block": 135.2,
+    "gru_block_roll": 578.4,
+    "hybrid_block_roll": 158.9,
+    "seasonal_24h": 130.7
+  },
+  "ttm_vs_gru_improvement_annual_pct": 30,
+  "ttm_vs_gru_improvement_jan_pct": 77,
+  "region_rmse": {
+    "서울시": 161.0,
+    "부산시": 1960.1,
+    "대전시": 30.9,
+    "강원도": 2017.7
+  },
+  "region_mean_power": {
+    "서울시": 638.9,
+    "부산시": 4038.7,
+    "대전시": 26.8,
+    "강원도": 2714.5
+  },
+  "region_rmse_pct": {
+    "서울시": 25.2,
+    "부산시": 48.5,
+    "대전시": 115.3,
+    "강원도": 74.3
+  }
+}
