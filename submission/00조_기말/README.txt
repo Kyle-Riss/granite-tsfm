@@ -26,7 +26,7 @@
 
 ■ 전체 코드·재현 (GitHub)
 ────────────────────────────────────────────
-레포: granite-tsfm (개인 fork)
+레포: https://github.com/Kyle-Riss/granite-tsfm
 - analysis/track1/  — 전국 KPX 분석 + 그림
 - analysis/track2/  — 서울 구별 분석
 - analysis/track3/  — 모델 성능 요약

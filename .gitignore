@@ -135,6 +135,10 @@ notebooks/thinklab/checkpoint/**
 # Generated pipeline artifacts (Parquet, checkpoints)
 /artifacts/
 
+# Course analysis outputs (regenerate via analysis/track1/load_kpx.py)
+/analysis/figures/
+/analysis/track1/*.parquet
+
 # Models for demo
 /tsfmhfdemos/neurips/models/
 
