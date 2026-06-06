@@ -139,6 +139,9 @@ notebooks/thinklab/checkpoint/**
 /analysis/figures/
 /analysis/track1/*.parquet
 
+# Local duplicate submission folder (zip uses submission/00조_기말/)
+/submission/3조/
+
 # Models for demo
 /tsfmhfdemos/neurips/models/
 
