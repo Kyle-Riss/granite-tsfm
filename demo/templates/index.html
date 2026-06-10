@@ -512,7 +512,8 @@
           <div class="year-panel" id="panel-2026" style="display:none">
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <button class="scenario-btn future-btn" onclick="runScenario('winter_2026')">❄️ 겨울 한파</button>
-              <button class="scenario-btn future-btn" onclick="runFuture('2026-04')">🌸 봄</button>
+              <button class="scenario-btn future-btn" onclick="runScenario('holiday_2026')">🏮 명절 연휴</button>
+              <button class="scenario-btn future-btn" onclick="runScenario('spring_2026')">🌸 봄</button>
               <button class="scenario-btn future-btn" onclick="runScenario('summer_2026')">☀️ 여름 폭염</button>
               <button class="scenario-btn future-btn" onclick="runScenario('year_end_2026')">🎆 연말</button>
             </div>
@@ -522,7 +523,8 @@
           <div class="year-panel" id="panel-2027" style="display:none">
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <button class="scenario-btn future-btn" onclick="runScenario('winter_2027')">❄️ 겨울 한파</button>
-              <button class="scenario-btn future-btn" onclick="runFuture('2027-04')">🌸 봄</button>
+              <button class="scenario-btn future-btn" onclick="runScenario('holiday_2027')">🏮 명절 연휴</button>
+              <button class="scenario-btn future-btn" onclick="runScenario('spring_2027')">🌸 봄</button>
               <button class="scenario-btn future-btn" onclick="runScenario('summer_2027')">☀️ 여름 폭염</button>
               <button class="scenario-btn future-btn" onclick="runScenario('year_end_2027')">🎆 연말</button>
             </div>
@@ -902,18 +904,31 @@ async function runFuture(yearMonth) {
 }
 
 async function runScenario(scenario) {
+  // 백엔드 _SCENARIOS 와 동일한 프리셋 (입력란 표시용)
   const scenarios = {
-    summer:      { ctx_start:'2024-07-01', ctx_end:'2024-07-21', pred_date:'2024-07-22' },
-    winter_cold: { ctx_start:'2024-01-01', ctx_end:'2024-01-21', pred_date:'2024-01-22' },
-    holiday:     { ctx_start:'2024-01-07', ctx_end:'2024-01-27', pred_date:'2024-01-28' },
-    spring:      { ctx_start:'2024-04-01', ctx_end:'2024-04-21', pred_date:'2024-04-22' },
-    year_end:    { ctx_start:'2024-12-01', ctx_end:'2024-12-21', pred_date:'2024-12-22' },
+    summer:        { ctx_start:'2025-07-01', ctx_end:'2025-07-21', pred_date:'2025-07-22' },
+    winter_cold:   { ctx_start:'2025-01-01', ctx_end:'2025-01-21', pred_date:'2025-01-22' },
+    holiday:       { ctx_start:'2025-01-07', ctx_end:'2025-01-27', pred_date:'2025-01-28' },
+    spring:        { ctx_start:'2025-04-01', ctx_end:'2025-04-21', pred_date:'2025-04-22' },
+    year_end:      { ctx_start:'2025-12-01', ctx_end:'2025-12-21', pred_date:'2025-12-22' },
+    summer_2026:   { ctx_start:'2026-07-01', ctx_end:'2026-07-21', pred_date:'2026-07-22' },
+    winter_2026:   { ctx_start:'2026-01-01', ctx_end:'2026-01-21', pred_date:'2026-01-22' },
+    holiday_2026:  { ctx_start:'2026-01-26', ctx_end:'2026-02-15', pred_date:'2026-02-16' },
+    spring_2026:   { ctx_start:'2026-04-01', ctx_end:'2026-04-21', pred_date:'2026-04-22' },
+    year_end_2026: { ctx_start:'2026-12-01', ctx_end:'2026-12-21', pred_date:'2026-12-22' },
+    summer_2027:   { ctx_start:'2027-07-01', ctx_end:'2027-07-21', pred_date:'2027-07-22' },
+    winter_2027:   { ctx_start:'2027-01-01', ctx_end:'2027-01-21', pred_date:'2027-01-22' },
+    holiday_2027:  { ctx_start:'2027-01-16', ctx_end:'2027-02-05', pred_date:'2027-02-06' },
+    spring_2027:   { ctx_start:'2027-04-01', ctx_end:'2027-04-21', pred_date:'2027-04-22' },
+    year_end_2027: { ctx_start:'2027-12-01', ctx_end:'2027-12-21', pred_date:'2027-12-22' },
   };
   const s = scenarios[scenario];
-  if (!s) return;
-  document.getElementById('pred-ctx-start').value = s.ctx_start;
-  document.getElementById('pred-ctx-end').value   = s.ctx_end;
-  document.getElementById('pred-date').value      = s.pred_date;
+  if (s) {
+    document.getElementById('pred-ctx-start').value = s.ctx_start;
+    document.getElementById('pred-ctx-end').value   = s.ctx_end;
+    document.getElementById('pred-date').value      = s.pred_date;
+  }
+  // 프리셋이 JS 맵에 없어도 백엔드 시나리오로는 항상 호출
   await callPredict(`/api/predict?scenario=${scenario}`);
 }
 

@@ -50,6 +50,21 @@ app.add_middleware(
 # ── 데이터 캐시 (서버 시작 시 1회 로드)
 _cache: dict = {}
 
+
+def _safe_float(val, ndigits: int = 1):
+    """JSON 직렬화 가능한 float (NaN/Inf → None)."""
+    if val is None or pd.isna(val):
+        return None
+    f = float(val)
+    if math.isnan(f) or math.isinf(f):
+        return None
+    return round(f, ndigits)
+
+
+def _series_to_json_list(series, ndigits: int = 1):
+    return [_safe_float(x, ndigits) for x in series]
+
+
 def _load():
     if _cache:
         return
@@ -227,8 +242,8 @@ async def get_history(
         "region": region,
         "count": len(df),
         "timestamps": df["ts"].tolist(),
-        "power": df["power"].round(1).tolist(),
-        "temp":  df["temp"].round(2).tolist(),
+        "power": _series_to_json_list(df["power"]),
+        "temp":  _series_to_json_list(df["temp"], ndigits=2),
     }
 
 
@@ -253,20 +268,32 @@ async def get_forecast(
         df = df[df["ts"] <= pd.Timestamp(end)]
 
     df = df.reset_index(drop=True)
-    ts = df["ts"].dt.strftime("%Y-%m-%dT%H:%M:%S").tolist()
 
+    if df.empty:
+        return {
+            "region": region,
+            "count": 0,
+            "timestamps": [],
+            "actual": [],
+            "predicted": [],
+            "rmse": None,
+        }
+
+    ts = df["ts"].dt.strftime("%Y-%m-%dT%H:%M:%S").tolist()
     result = {"region": region, "count": len(df), "timestamps": ts}
 
     if "power_actual" in df.columns:
-        result["actual"] = df["power_actual"].round(1).tolist()
+        result["actual"] = _series_to_json_list(df["power_actual"])
     if "power_pred" in df.columns:
-        result["predicted"] = df["power_pred"].round(1).tolist()
+        result["predicted"] = _series_to_json_list(df["power_pred"])
 
     rmse = None
     if "power_actual" in df.columns and "power_pred" in df.columns:
-        diff = df["power_actual"] - df["power_pred"]
-        rmse = float((diff ** 2).mean() ** 0.5)
-    result["rmse"] = round(rmse, 1) if rmse else None
+        valid = df.dropna(subset=["power_actual", "power_pred"])
+        if len(valid):
+            diff = valid["power_actual"] - valid["power_pred"]
+            rmse = _safe_float((diff ** 2).mean() ** 0.5)
+    result["rmse"] = rmse
 
     return result
 
@@ -407,14 +434,18 @@ async def get_district_monthly():
 _SCENARIOS = {
     "summer":       {"label": "여름 폭염 (2025-07)",    "ctx_start": "2025-07-01", "ctx_end": "2025-07-21 23:00:00", "pred_date": "2025-07-22"},
     "winter_cold":  {"label": "겨울 한파 (2025-01)",    "ctx_start": "2025-01-01", "ctx_end": "2025-01-21 23:00:00", "pred_date": "2025-01-22"},
-    "holiday":      {"label": "명절 연휴 (2025-01-27)", "ctx_start": "2025-01-07", "ctx_end": "2025-01-27 23:00:00", "pred_date": "2025-01-28"},
+    "holiday":      {"label": "명절 연휴 (2025 설날 1/28~30)", "ctx_start": "2025-01-07", "ctx_end": "2025-01-27 23:00:00", "pred_date": "2025-01-28"},
     "spring":       {"label": "봄 (2025-04)",            "ctx_start": "2025-04-01", "ctx_end": "2025-04-21 23:00:00", "pred_date": "2025-04-22"},
     "year_end":     {"label": "연말 (2025-12)",          "ctx_start": "2025-12-01", "ctx_end": "2025-12-21 23:00:00", "pred_date": "2025-12-22"},
     "summer_2026":  {"label": "여름 폭염 (2026-07)",    "ctx_start": "2026-07-01", "ctx_end": "2026-07-21 23:00:00", "pred_date": "2026-07-22"},
     "winter_2026":  {"label": "겨울 한파 (2026-01)",    "ctx_start": "2026-01-01", "ctx_end": "2026-01-21 23:00:00", "pred_date": "2026-01-22"},
+    "holiday_2026": {"label": "명절 연휴 (2026 설날 2/16~18)", "ctx_start": "2026-01-26", "ctx_end": "2026-02-15 23:00:00", "pred_date": "2026-02-16"},
+    "spring_2026":  {"label": "봄 (2026-04)",            "ctx_start": "2026-04-01", "ctx_end": "2026-04-21 23:00:00", "pred_date": "2026-04-22"},
     "year_end_2026":{"label": "연말 (2026-12)",          "ctx_start": "2026-12-01", "ctx_end": "2026-12-21 23:00:00", "pred_date": "2026-12-22"},
     "summer_2027":  {"label": "여름 폭염 (2027-07)",    "ctx_start": "2027-07-01", "ctx_end": "2027-07-21 23:00:00", "pred_date": "2027-07-22"},
     "winter_2027":  {"label": "겨울 한파 (2027-01)",    "ctx_start": "2027-01-01", "ctx_end": "2027-01-21 23:00:00", "pred_date": "2027-01-22"},
+    "holiday_2027": {"label": "명절 연휴 (2027 설날 2/6)",   "ctx_start": "2027-01-16", "ctx_end": "2027-02-05 23:00:00", "pred_date": "2027-02-06"},
+    "spring_2027":  {"label": "봄 (2027-04)",            "ctx_start": "2027-04-01", "ctx_end": "2027-04-21 23:00:00", "pred_date": "2027-04-22"},
     "year_end_2027":{"label": "연말 (2027-12)",          "ctx_start": "2027-12-01", "ctx_end": "2027-12-21 23:00:00", "pred_date": "2027-12-22"},
 }
 
@@ -558,22 +589,29 @@ async def predict(
     future_mode = ctx_s > DATA_END  # 미래 구간 시뮬레이션 모드
 
     if future_mode:
-        # ── 미래 예측 모드: 보유 데이터 마지막 512시간을 컨텍스트로 사용
-        # 요청한 구간의 월·일 패턴을 1년 또는 N년 전 같은 기간으로 매핑
-        years_back = ctx_s.year - 2024
+        # ── 미래 예측 모드: 미래 연도마다 서로 다른 과거 연도의 같은 계절 패턴을 컨텍스트로 사용
+        # 2025→2024, 2026→2023, 2027→2022 — 실제 연도 간 변동성이 예측에 반영되도록
+        # 2025→2024, 2026→2023, 2027→2022 (그 이후는 2020년까지 내려감)
+        source_year = max(2020, min(2024, 2024 - (ctx_s.year - 2025)))
+        years_back = ctx_s.year - source_year
         proxy_s = ctx_s - pd.DateOffset(years=years_back)
         proxy_e = ctx_e - pd.DateOffset(years=years_back)
-        # 2024 범위 클램핑
+        # 보유 데이터 범위 클램핑
         proxy_e = min(proxy_e, DATA_END)
 
-        ctx_df = fc_2024[(fc_2024["ts"] >= proxy_s) & (fc_2024["ts"] <= proxy_e)][["ts","power_actual","temp"]].copy()
+        if proxy_s.year >= 2024:
+            ctx_df = fc_2024[(fc_2024["ts"] >= proxy_s) & (fc_2024["ts"] <= proxy_e)][["ts", "power_actual", "temp"]].copy()
+            ctx_df = ctx_df.rename(columns={"power_actual": "power"})
+        else:
+            ctx_df = seoul[(seoul["ts"] >= proxy_s) & (seoul["ts"] <= proxy_e)][["ts", "power", "temp"]].copy()
         if len(ctx_df) < 168:
             # fallback: 2024년 마지막 512시간
-            ctx_df = fc_2024.tail(512)[["ts","power_actual","temp"]].copy()
-        ctx_df = ctx_df.rename(columns={"ts": "timestamp", "power_actual": "power"})
+            ctx_df = fc_2024.tail(512)[["ts", "power_actual", "temp"]].copy()
+            ctx_df = ctx_df.rename(columns={"power_actual": "power"})
+        ctx_df = ctx_df.rename(columns={"ts": "timestamp"})
         sim_note = (
             f"[미래 예측 시뮬레이션] {ctx_s.date()}~{ctx_e.date()} 구간은 보유 데이터 범위를 초과합니다. "
-            f"{proxy_s.date()}~{proxy_e.date()} (같은 계절 2024년 패턴)을 컨텍스트로 사용했습니다."
+            f"{proxy_s.date()}~{proxy_e.date()} (같은 계절 {source_year}년 실측 패턴)을 컨텍스트로 사용했습니다."
         )
     elif fc_2024 is not None and ctx_s.year >= 2024:
         ctx_df = fc_2024[(fc_2024["ts"] >= ctx_s) & (fc_2024["ts"] <= ctx_e)][["ts","power_actual","temp"]].copy()
@@ -622,8 +660,13 @@ async def predict(
     compare_to_ctx_str = (f"+{compare_to_ctx}%" if compare_to_ctx >= 0 else f"{compare_to_ctx}%") + " (직전 컨텍스트 대비)"
 
     # ── 시나리오 인사이트 (프리셋 or 동적 fallback)
-    if scenario and scenario in _SCENARIO_INSIGHT:
-        raw_insight = _SCENARIO_INSIGHT[scenario]
+    # winter_2026 → winter_cold 처럼 연도 접미사를 떼고 기본 인사이트에 매핑
+    insight_key = None
+    if scenario:
+        base = scenario.rsplit("_20", 1)[0]
+        insight_key = {"winter": "winter_cold"}.get(base, base)
+    if insight_key and insight_key in _SCENARIO_INSIGHT:
+        raw_insight = _SCENARIO_INSIGHT[insight_key]
     else:
         raw_insight = _dynamic_insight(pred_mwh, ctx_temp_mean, ctx_power_mean)
 
