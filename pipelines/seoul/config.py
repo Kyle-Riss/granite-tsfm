@@ -47,6 +47,10 @@ HYBRID_HOLDOUT_FORECAST_PARQUET = ARTIFACTS_DIR / "forecast_hybrid_holdout_seoul
 FORECAST_SEOUL_FORWARD_PARQUET = ARTIFACTS_DIR / "forecast_seoul_forward.parquet"
 FORECAST_SEOUL_FORWARD_JSON = ARTIFACTS_DIR / "forecast_seoul_forward.json"
 FORECAST_SEOUL_FORWARD_HTML = ARTIFACTS_DIR / "forecast_seoul_forward.html"
+# TTM 96h one-shot block chain (frozen backbone; not hybrid roll)
+TTM_SYNTHETIC_HISTORY_PARQUET = ARTIFACTS_DIR / "ttm_synthetic_history.parquet"
+TTM_SYNTHETIC_HISTORY_JSON = ARTIFACTS_DIR / "ttm_synthetic_history.json"
+SYNTHETIC_HISTORY_START = "2025-01-01 00:00:00"
 FORECAST_REGION_COMPARE_HTML = ARTIFACTS_DIR / "forecast_region_compare.html"
 FORECAST_REGION_COMPARE_JSON = ARTIFACTS_DIR / "forecast_region_compare.json"
 HYBRID_REPORT_HTML = ARTIFACTS_DIR / "hybrid_report.html"

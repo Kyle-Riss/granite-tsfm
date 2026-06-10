@@ -40,6 +40,12 @@ TTM_MODEL_PATH   = str(ARTS / "ttm_finetuned_seoul" / "model")
 GRU_CHECKPOINT   = ARTS / "hybrid_seoul.pt"
 REGIONAL_PARQUET = ARTS / "regional_hourly_34k.parquet"
 FORECAST_PARQUET = ARTS / "forecast_region_{region}_2024.parquet"
+from pipelines.seoul.config import (  # noqa: E402
+    SYNTHETIC_HISTORY_START,
+    TTM_SYNTHETIC_HISTORY_PARQUET,
+)
+
+DATA_END = pd.Timestamp("2024-12-31 23:00:00")
 
 app = FastAPI(title="전력소비량 예측 데모", version="1.0.0")
 app.add_middleware(
@@ -190,6 +196,277 @@ def _run_prediction(ctx_df: pd.DataFrame) -> dict:
     return {
         "pred_mwh": round(pred_mwh, 1),
         "emb_l2norm": round(float(emb.norm().item()), 3),
+    }
+
+
+_ttm_block_cache: dict = {}
+_extended_df_cache: dict = {}
+
+
+def _load_ttm_block_forecaster():
+    if _ttm_block_cache:
+        return _ttm_block_cache
+
+    from pipelines.seoul.hybrid_common import load_hourly
+    from pipelines.seoul.hybrid_eval import TTMBlockForecaster
+
+    seoul_path = ARTS / "seoul_city_hourly.parquet"
+    if seoul_path.is_file():
+        df = load_hourly(seoul_path)
+    else:
+        _load()
+        df = _cache["regional"][_cache["regional"]["region"] == "서울시"].copy()
+        df = df.sort_values("ts").reset_index(drop=True)
+
+    train_df = df[pd.to_datetime(df["ts"]).dt.year <= 2023].copy()
+    forecaster = TTMBlockForecaster(
+        train_df,
+        "ibm-granite/granite-timeseries-ttm-r2",
+        context_length=512,
+        prediction_length=96,
+        device="cpu",
+    )
+    _ttm_block_cache["forecaster"] = forecaster
+    _ttm_block_cache["df"] = df
+    return _ttm_block_cache
+
+
+def _prediction_test_start(df: pd.DataFrame, anchor_end: pd.Timestamp) -> int:
+    ts_col = "ts"
+    after = df.index[df[ts_col] > anchor_end]
+    if len(after) > 0:
+        return int(after[0])
+    return len(df)
+
+
+def _run_prediction_block(
+    anchor_end: pd.Timestamp,
+    horizon: int = 96,
+    *,
+    df: pd.DataFrame | None = None,
+    output_timestamps: list | None = None,
+) -> dict:
+    """Canonical 96h TTM one-shot block forecast."""
+    cache = _load_ttm_block_forecaster()
+    df = df if df is not None else cache["df"]
+    forecaster = cache["forecaster"]
+
+    ts_col = "ts"
+    test_start = _prediction_test_start(df, anchor_end)
+    if test_start == 0:
+        raise ValueError(f"컨텍스트 종료({anchor_end}) 이전 데이터가 없습니다.")
+
+    preds = forecaster.predict(df, test_start, horizon)
+    n = min(len(preds), horizon)
+    pred_slice = preds[:n]
+
+    if output_timestamps is not None:
+        ts_list = output_timestamps[:n]
+        actual_slice = None
+        rmse = None
+    else:
+        actual = df["power"].iloc[test_start : test_start + horizon].to_numpy(dtype=np.float64)
+        ts_list = pd.to_datetime(df[ts_col].iloc[test_start : test_start + horizon]).tolist()
+        n = min(n, len(actual), len(ts_list))
+        pred_slice = pred_slice[:n]
+        actual_slice = actual[:n]
+        rmse = None
+        if n > 0 and len(actual_slice) > 0:
+            rmse = round(float(np.sqrt(np.mean((pred_slice - actual_slice) ** 2))), 1)
+
+    return {
+        "horizon": horizon,
+        "timestamps": [str(t) for t in ts_list[:n]],
+        "predicted": _series_to_json_list(pred_slice),
+        "actual": _series_to_json_list(actual_slice) if actual_slice is not None else None,
+        "block_rmse": rmse,
+        "pred_mwh": round(float(np.mean(pred_slice)), 1) if n else None,
+        "pred_day1_avg": round(float(np.mean(pred_slice[:24])), 1) if n >= 24 else round(float(pred_slice[0]), 1),
+        "model_mode": "ttm_96h_oneshot",
+    }
+
+
+def _get_extended_work_df(through: pd.Timestamp) -> tuple[pd.DataFrame, dict]:
+    """Actual history + TTM one-shot synthetic blocks through `through`."""
+    through = pd.Timestamp(through)
+    cache = _load_ttm_block_forecaster()
+    hourly = cache["df"]
+    if through <= DATA_END:
+        work = hourly[hourly["ts"] <= through].copy()
+        return work, {"synthetic": False}
+
+    cache_key = str(through.floor("h"))
+    if cache_key in _extended_df_cache:
+        return _extended_df_cache[cache_key], _extended_df_cache[f"{cache_key}_meta"]
+
+    from pipelines.seoul.ttm_roll_forward import ensure_synthetic_through
+
+    synth = None
+    if TTM_SYNTHETIC_HISTORY_PARQUET.is_file():
+        synth = pd.read_parquet(TTM_SYNTHETIC_HISTORY_PARQUET)
+
+    synth, work, meta = ensure_synthetic_through(
+        hourly,
+        through,
+        cache["forecaster"],
+        existing_synthetic=synth,
+    )
+    meta["synthetic"] = True
+
+    if meta.get("blocks_run", 0) > 0:
+        TTM_SYNTHETIC_HISTORY_PARQUET.parent.mkdir(parents=True, exist_ok=True)
+        synth.to_parquet(TTM_SYNTHETIC_HISTORY_PARQUET, index=False)
+
+    _extended_df_cache[cache_key] = work
+    _extended_df_cache[f"{cache_key}_meta"] = meta
+    return work, meta
+
+
+# 미래 연도 → 보유 실측 소스 연도 (demo/README.md)
+SEOLLAL_ANCHOR_BY_YEAR: dict[int, str] = {
+    2024: "2024-01-28",
+    2023: "2023-01-22",
+    2022: "2022-02-01",
+    2021: "2021-02-12",
+    2020: "2020-01-25",
+}
+
+
+def _target_year_from(ctx_s: pd.Timestamp, pred_date: str | None, scenario: str | None) -> int:
+    if pred_date:
+        return pd.Timestamp(pred_date).year
+    if ctx_s.year > int(DATA_END.year):
+        return int(ctx_s.year)
+    s = _SCENARIOS.get(scenario, {}) if scenario else {}
+    if s.get("pred_date"):
+        return pd.Timestamp(s["pred_date"]).year
+    return int(ctx_s.year)
+
+
+def _source_year_for_target(target_year: int) -> int:
+    """2025→2024, 2026→2023, 2027→2022 (이후는 2020까지)."""
+    return max(2020, min(2024, 2024 - (target_year - 2025)))
+
+
+def _resolve_proxy_mapping(
+    scenario: str | None,
+    pred_date: str | None,
+    ctx_s: pd.Timestamp,
+) -> dict:
+    """
+    calendar: 동일 양력·시각 → 소스 연도 실측 (연도마다 다른 과거 패턴)
+    holiday_anchor: 설날 양력 차이 → 소스 연도 설날 기준 일수 오프셋
+    """
+    target_year = _target_year_from(ctx_s, pred_date, scenario)
+    source_year = _source_year_for_target(target_year)
+    year_offset = target_year - source_year
+
+    s = _SCENARIOS.get(scenario, {}) if scenario else {}
+    if scenario and "holiday" in scenario:
+        anchor = pd.Timestamp(pred_date or s.get("pred_date"))
+        proxy_anchor = pd.Timestamp(SEOLLAL_ANCHOR_BY_YEAR[source_year])
+        return {
+            "mode": "holiday_anchor",
+            "target_anchor": anchor,
+            "proxy_anchor": proxy_anchor,
+            "target_year": target_year,
+            "source_year": source_year,
+            "year_offset": year_offset,
+            "label": (
+                f"{target_year} 설날({anchor.date()}) → "
+                f"{source_year} 설({proxy_anchor.date()}) 실측, 일수 오프셋"
+            ),
+        }
+    return {
+        "mode": "calendar",
+        "target_anchor": None,
+        "proxy_anchor": None,
+        "target_year": target_year,
+        "source_year": source_year,
+        "year_offset": year_offset,
+        "label": f"{target_year} → {source_year}년 동일 양력·시각 실측",
+    }
+
+
+def _map_ts_to_proxy(ts: pd.Timestamp, mapping: dict) -> pd.Timestamp:
+    ts = pd.Timestamp(ts)
+    if mapping.get("mode") == "holiday_anchor":
+        return mapping["proxy_anchor"] + (ts - mapping["target_anchor"])
+    return ts - pd.DateOffset(years=mapping["year_offset"])
+
+
+def _actual_lookup_tables(seoul: pd.DataFrame) -> tuple[pd.DataFrame, str, str]:
+    """Hourly actual power/temp 2020–2024 indexed by ts."""
+    src = seoul.copy()
+    src["ts"] = pd.to_datetime(src["ts"])
+    return src.set_index("ts"), "power", "temp"
+
+
+def _proxy_context_frame(
+    ctx_s: pd.Timestamp,
+    ctx_e: pd.Timestamp,
+    fc_2024: pd.DataFrame | None,
+    seoul: pd.DataFrame,
+    mapping: dict,
+) -> pd.DataFrame:
+    """Map future context window to held-out actuals (calendar or holiday anchor)."""
+    proxy_s = _map_ts_to_proxy(ctx_s, mapping)
+    proxy_e = min(_map_ts_to_proxy(ctx_e, mapping), DATA_END)
+
+    ctx_df = seoul[(seoul["ts"] >= proxy_s) & (seoul["ts"] <= proxy_e)][["ts", "power", "temp"]].copy()
+    return ctx_df.rename(columns={"ts": "timestamp"})
+
+
+def _build_calendar_proxy_work(
+    hourly: pd.DataFrame,
+    through: pd.Timestamp,
+    fc_2024: pd.DataFrame | None,
+    seoul: pd.DataFrame,
+    mapping: dict,
+) -> tuple[pd.DataFrame, dict]:
+    """
+    Actual history through 2024 + future hours from mapped source-year actuals.
+    2025→2024, 2026→2023, 2027→2022. Holiday: days-from-Seollal offset per source year.
+    """
+    hourly = hourly.sort_values("ts").reset_index(drop=True)
+    hourly["ts"] = pd.to_datetime(hourly["ts"])
+    hist = hourly[hourly["ts"] <= DATA_END].copy()
+    through = pd.Timestamp(through)
+
+    if through <= DATA_END:
+        return hist, {"method": "actual", "proxy_year": None}
+
+    src, power_col, temp_col = _actual_lookup_tables(seoul)
+    future_start = hist["ts"].max() + pd.Timedelta(hours=1)
+    future_ts = pd.date_range(future_start, through, freq="h")
+
+    rows: list[dict] = []
+    for ts in future_ts:
+        proxy_ts = _map_ts_to_proxy(ts, mapping)
+        if proxy_ts > DATA_END or proxy_ts not in src.index:
+            continue
+        row = src.loc[proxy_ts]
+        if pd.isna(row[power_col]):
+            continue
+        rows.append(
+            {
+                "ts": ts,
+                "power": float(row[power_col]),
+                "temp": float(row[temp_col]) if temp_col in row.index and pd.notna(row[temp_col]) else np.nan,
+            }
+        )
+
+    if not rows:
+        raise ValueError(f"실측 매핑 실패: {future_start}~{through} ({mapping.get('label')})")
+
+    work = pd.concat([hist, pd.DataFrame(rows)], ignore_index=True)
+    work = work.sort_values("ts").reset_index(drop=True)
+    return work, {
+        "method": mapping.get("mode", "calendar"),
+        "proxy_year": mapping.get("source_year"),
+        "target_year": mapping.get("target_year"),
+        "proxy_note": mapping.get("label"),
+        "through": str(through),
     }
 
 
@@ -557,11 +834,12 @@ async def predict(
     ctx_start:  Optional[str] = Query(None, description="컨텍스트 시작 YYYY-MM-DD (최소 21일 전)"),
     ctx_end:    Optional[str] = Query(None, description="컨텍스트 종료 YYYY-MM-DD HH:MM (예측 직전까지)"),
     pred_date:  Optional[str] = Query(None, description="예측 기준일 YYYY-MM-DD (ctx_end 다음 날)"),
+    horizon:    int = Query(96, description="예측 horizon (시간). 기본 96 = TTM 4일 one-shot"),
 ):
     """
-    [INPUT]  ctx_start ~ ctx_end: 과거 전력·기온 데이터 (최소 512시간 = 21일 권장)
-    [MODEL]  TTM(frozen) → 512h 임베딩 → GRU head → 1-step 예측
-    [OUTPUT] pred_mwh: 예측 전력거래량 (MWh), actual_mwh: 실측값, error_mwh: 오차
+    [INPUT]  ctx_start ~ ctx_end: 과거 전력·기온 (최소 168h, 권장 512h)
+    [MODEL]  horizon=96: frozen TTM 96h one-shot (canonical) | horizon=1: GRU head ablation
+    [FUTURE] 과거 실측 프록시(2025→2024, 2026→2023, 2027→2022) + TTM 96h one-shot
     """
     # ── 시나리오 or 직접 입력
     if scenario:
@@ -584,34 +862,18 @@ async def predict(
     ctx_s = pd.Timestamp(ctx_start)
     ctx_e = pd.Timestamp(ctx_end)
 
-    # 데이터 보유 범위: 2020-01-01 ~ 2024-12-31
-    DATA_END = pd.Timestamp("2024-12-31 23:00:00")
-    future_mode = ctx_s > DATA_END  # 미래 구간 시뮬레이션 모드
+    future_mode = ctx_s > DATA_END
+    proxy_meta: dict = {"method": "actual"}
+    pred_df: pd.DataFrame | None = None
 
     if future_mode:
-        # ── 미래 예측 모드: 미래 연도마다 서로 다른 과거 연도의 같은 계절 패턴을 컨텍스트로 사용
-        # 2025→2024, 2026→2023, 2027→2022 — 실제 연도 간 변동성이 예측에 반영되도록
-        # 2025→2024, 2026→2023, 2027→2022 (그 이후는 2020년까지 내려감)
-        source_year = max(2020, min(2024, 2024 - (ctx_s.year - 2025)))
-        years_back = ctx_s.year - source_year
-        proxy_s = ctx_s - pd.DateOffset(years=years_back)
-        proxy_e = ctx_e - pd.DateOffset(years=years_back)
-        # 보유 데이터 범위 클램핑
-        proxy_e = min(proxy_e, DATA_END)
-
-        if proxy_s.year >= 2024:
-            ctx_df = fc_2024[(fc_2024["ts"] >= proxy_s) & (fc_2024["ts"] <= proxy_e)][["ts", "power_actual", "temp"]].copy()
-            ctx_df = ctx_df.rename(columns={"power_actual": "power"})
-        else:
-            ctx_df = seoul[(seoul["ts"] >= proxy_s) & (seoul["ts"] <= proxy_e)][["ts", "power", "temp"]].copy()
-        if len(ctx_df) < 168:
-            # fallback: 2024년 마지막 512시간
-            ctx_df = fc_2024.tail(512)[["ts", "power_actual", "temp"]].copy()
-            ctx_df = ctx_df.rename(columns={"power_actual": "power"})
-        ctx_df = ctx_df.rename(columns={"ts": "timestamp"})
+        mapping = _resolve_proxy_mapping(scenario, pred_date, ctx_s)
+        cache = _load_ttm_block_forecaster()
+        pred_df, proxy_meta = _build_calendar_proxy_work(cache["df"], ctx_e, fc_2024, seoul, mapping)
+        ctx_df = _proxy_context_frame(ctx_s, ctx_e, fc_2024, seoul, mapping)
         sim_note = (
-            f"[미래 예측 시뮬레이션] {ctx_s.date()}~{ctx_e.date()} 구간은 보유 데이터 범위를 초과합니다. "
-            f"{proxy_s.date()}~{proxy_e.date()} (같은 계절 {source_year}년 실측 패턴)을 컨텍스트로 사용했습니다."
+            f"[미래 시뮬] {proxy_meta.get('proxy_note', '')} → TTM 96h one-shot. "
+            f"예측일({pred_date or '—'})만 미래."
         )
     elif fc_2024 is not None and ctx_s.year >= 2024:
         ctx_df = fc_2024[(fc_2024["ts"] >= ctx_s) & (fc_2024["ts"] <= ctx_e)][["ts","power_actual","temp"]].copy()
@@ -627,12 +889,37 @@ async def predict(
         raise HTTPException(400, f"컨텍스트가 너무 짧습니다 ({ctx_hours}h). 최소 168시간(7일) 이상 필요합니다. 2024년 이전 날짜를 입력하거나 시나리오 버튼을 사용하세요.")
 
     # ── 모델 실행
+    block = None
     try:
-        result = _run_prediction(ctx_df)
+        if horizon >= 96:
+            h = min(horizon, 96)
+            forecast_start = pd.Timestamp(pred_date) if pred_date else ctx_e + pd.Timedelta(hours=1)
+            future_ts = [forecast_start + pd.Timedelta(hours=i) for i in range(h)]
+            block = _run_prediction_block(
+                ctx_e,
+                horizon=h,
+                df=pred_df,
+                output_timestamps=future_ts if future_mode else None,
+            )
+            result = {"pred_mwh": block["pred_day1_avg"], "emb_l2norm": None, "block": block}
+            pred_mwh = block["pred_mwh"]
+        elif horizon == 1:
+            result = _run_prediction(ctx_df)
+            pred_mwh = result["pred_mwh"]
+            result["block"] = None
+        else:
+            forecast_start = pd.Timestamp(pred_date) if pred_date else ctx_e + pd.Timedelta(hours=1)
+            future_ts = [forecast_start + pd.Timedelta(hours=i) for i in range(horizon)]
+            block = _run_prediction_block(
+                ctx_e,
+                horizon=horizon,
+                df=pred_df,
+                output_timestamps=future_ts if future_mode else None,
+            )
+            result = {"pred_mwh": block["pred_mwh"], "emb_l2norm": None, "block": block}
+            pred_mwh = result["pred_mwh"]
     except Exception as e:
         raise HTTPException(500, f"모델 오류: {e}")
-
-    pred_mwh = result["pred_mwh"]
 
     # ── 실측값 (pred_date 하루 평균, 2024년만 가능)
     actual_avg = None
@@ -687,37 +974,58 @@ async def predict(
             "avg_temp_c":       ctx_temp_mean,
             "max_power_mwh":    ctx_power_max,
             "description":      (
-                f"{ctx_hours}시간({round(ctx_hours/24,1)}일)의 서울 전력거래량·기온 이력 → "
-                "TTM이 512h 패턴 임베딩 → GRU가 다음 시점 예측"
+                f"{ctx_hours}시간({round(ctx_hours/24,1)}일) 서울 전력·기온 → "
+                + (
+                    "TTM 96h one-shot (frozen backbone, canonical)"
+                    if horizon >= 96
+                    else "frozen TTM embedding → GRU head 1-step (ablation)"
+                )
             ),
         },
         # ────────── MODEL 내부 ──────────
         "model": {
-            "name":               "Granite TTM-r2 (frozen) + GRU head",
+            "name":               (
+                "Granite TTM-r2 96h one-shot"
+                if horizon >= 96
+                else "Granite TTM-r2 (frozen) + GRU head"
+            ),
             "context_length":     512,
-            "prediction_horizon": 96,
-            "ttm_emb_l2norm":     result["emb_l2norm"],
+            "prediction_horizon": 96 if horizon >= 96 else 1,
+            "ttm_emb_l2norm":     result.get("emb_l2norm"),
+            "mode":               block["model_mode"] if block else "hybrid_1step",
             "note": (
-                "TTM은 512h를 한 번에 임베딩(오차 누적 없음). "
-                "GRU는 그 임베딩 + 시간·요일 피처로 다음 스텝을 예측."
+                "Canonical: frozen TTM 96h one-shot (Prophet+GRU→TTM+GRU 철학, roll 아님). "
+                "GRU head는 horizon=1 ablation·벤치마크용."
+                if horizon >= 96
+                else "GRU head 1-step — hybrid roll(167 MWh) 대비 one-shot(112 MWh) 벤치마크 참고."
             ),
         },
         # ────────── OUTPUT ──────────
         "output": {
             "pred_date":          pred_date,
             "pred_mwh":           pred_mwh,
+            "pred_day1_avg_mwh":  block["pred_day1_avg"] if block else pred_mwh,
             "actual_day_avg_mwh": actual_avg,
             "actual_h0_mwh":      actual_h0,
             "error_mwh":          error_vs_avg,
             "error_pct":          error_pct,
-            "interpretation":     _interpret(pred_mwh, ctx_temp_mean, ctx_power_mean),
+            "block_rmse":         block["block_rmse"] if block else None,
+            "interpretation":     _interpret(
+                block["pred_day1_avg"] if block else pred_mwh,
+                ctx_temp_mean,
+                ctx_power_mean,
+            ),
         },
+        "forecast_block": block,
         # ────────── INSIGHT (신규) ──────────
         "insight": insight,
         # ────────── 미래 시뮬레이션 안내 ──────────
         "simulation": {
             "future_mode": future_mode,
             "note": sim_note,
+            "method": proxy_meta.get("method") if future_mode else None,
+            "proxy_year": proxy_meta.get("proxy_year") if future_mode else None,
+            "target_year": proxy_meta.get("target_year") if future_mode else None,
         } if future_mode else None,
     }
 

@@ -435,7 +435,7 @@
         <strong>핵심 결론:</strong>
         <span style="margin-left:8px">2024년 8,784시간 예측에서 TTM RMSE <strong>111 MWh</strong> — 실측 대비 오차율 <strong>약 17%</strong></span><br>
         <strong>미래 적용:</strong>
-        <span style="margin-left:8px">같은 모델로 2025~2027 시뮬레이션 → "과거에 이 정도 맞혔으니 미래도 이 범위 안에 들어올 확률이 높다"</span>
+        <span style="margin-left:8px">TTM 96h 블록 연쇄 합성 이력 → 2025~2027 시나리오 (Hybrid roll 아님)</span>
       </div>
     </div>
 
@@ -487,7 +487,7 @@
       <!-- 인풋 패널 -->
       <div class="card">
         <div class="card-title">⚡ 실시간 예측 — 인풋</div>
-        <div class="card-sub">과거 데이터를 보여주면 AI가 다음 시점을 예측합니다</div>
+        <div class="card-sub">512h 컨텍스트 → frozen TTM <strong>96h one-shot</strong> (4일 한 번에 예측)</div>
 
         <!-- 시나리오 연도 탭 -->
         <div style="margin-top:16px">
@@ -531,7 +531,8 @@
           </div>
 
           <p style="font-size:10px;color:var(--muted);margin-top:8px">
-            ※ 2024년까지만 실데이터 보유. 2025년 이후는 같은 계절 2024년 패턴을 컨텍스트로 시뮬레이션. 실측값은 아래 입력란에서 직접 비교 가능.
+            ※ <strong>2025→2024</strong> · <strong>2026→2023</strong> · <strong>2027→2022</strong> 실측 매핑 (연도마다 다른 패턴).
+            명절은 설날 양력 차이 → 해당 소스 연도 설 기준 <strong>일수 오프셋</strong>.
           </p>
         </div>
 
@@ -571,7 +572,7 @@
       <!-- 아웃풋 패널 -->
       <div class="card">
         <div class="card-title">📤 아웃풋 — 예측 결과</div>
-        <div class="card-sub">TTM 임베딩 → GRU → 예측 전력거래량 (MWh)</div>
+        <div class="card-sub">TTM 96h one-shot — 4일치 전력거래량 블록 (MWh)</div>
 
         <div id="predict-loading" style="display:none;text-align:center;padding:40px;color:var(--muted)">
           <div style="font-size:32px">⏳</div>
@@ -606,6 +607,12 @@
             <ol style="margin-top:6px;padding-left:18px;line-height:1.8" id="model-pipeline-steps"></ol>
           </div>
 
+          <!-- 96h 예측 블록 차트 -->
+          <div style="margin-top:12px">
+            <p style="font-size:12px;color:var(--muted);margin-bottom:4px">96h 예측 블록 (4일 one-shot)</p>
+            <div id="chart-forecast-block" style="height:200px"></div>
+          </div>
+
           <!-- 컨텍스트 차트 -->
           <div style="margin-top:12px">
             <p style="font-size:12px;color:var(--muted);margin-bottom:4px">컨텍스트 전력거래량 (입력 이력)</p>
@@ -636,9 +643,9 @@
           <div style="font-weight:700;margin:6px 0 4px;font-size:13px">MODEL</div>
           <div style="font-size:11px;color:var(--muted);line-height:1.5">
             <strong>TTM (frozen)</strong><br>
-            → 192차원 임베딩<br>
-            + <strong>GRU head</strong><br>
-            → 96h 패턴 인식
+            512h 컨텍스트<br>
+            → <strong>96h one-shot</strong><br>
+            (GRU head는 ablation)
           </div>
         </div>
         <div style="text-align:center;font-size:22px;color:var(--orange)">→</div>
@@ -646,8 +653,8 @@
           <div style="font-size:24px">📤</div>
           <div style="font-weight:700;margin:6px 0 4px;font-size:13px">OUTPUT</div>
           <div style="font-size:11px;color:var(--muted);line-height:1.5">
-            다음 시점<br>
-            <strong>예측 전력거래량</strong><br>
+            <strong>96시간</strong> (4일)<br>
+            전력거래량 블록<br>
             (MWh)<br>
             + 실측 대비 오차
           </div>
@@ -899,7 +906,7 @@ async function runFuture(yearMonth) {
   document.getElementById('pred-ctx-start').value = ctxStart;
   document.getElementById('pred-ctx-end').value   = ctxEnd;
   document.getElementById('pred-date').value      = predDate;
-  const url = `/api/predict?ctx_start=${encodeURIComponent(ctxStart)}&ctx_end=${encodeURIComponent(ctxEnd + ' 23:00:00')}&pred_date=${predDate}`;
+  const url = `/api/predict?ctx_start=${encodeURIComponent(ctxStart)}&ctx_end=${encodeURIComponent(ctxEnd + ' 23:00:00')}&pred_date=${predDate}&horizon=96`;
   await callPredict(url);
 }
 
@@ -929,7 +936,7 @@ async function runScenario(scenario) {
     document.getElementById('pred-date').value      = s.pred_date;
   }
   // 프리셋이 JS 맵에 없어도 백엔드 시나리오로는 항상 호출
-  await callPredict(`/api/predict?scenario=${scenario}`);
+  await callPredict(`/api/predict?scenario=${scenario}&horizon=96`);
 }
 
 async function runCustomPredict() {
@@ -937,7 +944,7 @@ async function runCustomPredict() {
   const ctxEnd   = document.getElementById('pred-ctx-end').value;
   const predDate = document.getElementById('pred-date').value;
   if (!ctxStart || !ctxEnd) { alert('시작/종료 날짜를 입력하세요'); return; }
-  const url = `/api/predict?ctx_start=${ctxStart}&ctx_end=${ctxEnd} 23:00:00&pred_date=${predDate || ''}`;
+  const url = `/api/predict?ctx_start=${ctxStart}&ctx_end=${ctxEnd} 23:00:00&pred_date=${predDate || ''}&horizon=96`;
   await callPredict(url);
 }
 
@@ -969,6 +976,8 @@ function renderPredictResult(data) {
   const mdl = data.model;
   const ins = data.insight || {};
   const sim = data.simulation;
+  const fb = data.forecast_block;
+  const isOneshot = mdl.mode === 'ttm_96h_oneshot' || (fb && fb.model_mode === 'ttm_96h_oneshot');
 
   // 마지막 예측값 저장 (실측 수동 입력 비교용)
   _lastPredMwh = out.pred_mwh;
@@ -992,7 +1001,7 @@ function renderPredictResult(data) {
     banner.innerHTML = `
       <strong>🔮 미래 예측 시뮬레이션 모드</strong><br>
       ${sim.note}<br>
-      <span style="color:#92400e">실측 비교 없이 모델 예측값만 표시됩니다. 계절 패턴이 반복된다는 가정 하의 참고용 수치입니다.</span>
+      <span style="color:#92400e">실측 비교 없음. 2024 실측을 동일 양력·시각에 매핑한 컨텍스트 기반 TTM 96h 예측입니다.</span>
     `;
     document.getElementById('predict-result').prepend(banner);
   }
@@ -1025,22 +1034,22 @@ function renderPredictResult(data) {
   const errColor = out.error_pct != null ? (out.error_pct < 15 ? 'var(--green)' : out.error_pct < 30 ? 'var(--orange)' : 'var(--red)') : 'var(--muted)';
   document.getElementById('result-kpis').innerHTML = `
     <div class="kpi-box" style="border-top:3px solid var(--blue)">
-      <div class="kpi-label">예측 전력거래량</div>
-      <div class="kpi-value" style="color:var(--blue)">${out.pred_mwh}</div>
+      <div class="kpi-label">${isOneshot ? '1일차 평균 (D+1)' : '예측 전력거래량'}</div>
+      <div class="kpi-value" style="color:var(--blue)">${out.pred_day1_avg_mwh ?? out.pred_mwh}</div>
       <div class="kpi-unit">MWh</div>
       <div style="font-size:10px;color:var(--muted);margin-top:4px">${ins.compare_to_avg ?? ''}</div>
+    </div>
+    <div class="kpi-box" style="border-top:3px solid #7c3aed">
+      <div class="kpi-label">${isOneshot ? '96h 블록 평균' : '실측 (당일)'}</div>
+      <div class="kpi-value" style="color:#7c3aed">${isOneshot ? (out.pred_mwh ?? '—') : (out.actual_day_avg_mwh ?? '—')}</div>
+      <div class="kpi-unit">MWh</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px">${isOneshot ? '4일 one-shot' : (ins.compare_to_ctx ?? '')}</div>
     </div>
     <div class="kpi-box" style="border-top:3px solid var(--navy)">
       <div class="kpi-label">실측 (당일 평균)</div>
       <div class="kpi-value" style="color:var(--navy)">${out.actual_day_avg_mwh ?? '—'}</div>
       <div class="kpi-unit">MWh</div>
-      <div style="font-size:10px;color:var(--muted);margin-top:4px">${ins.compare_to_ctx ?? ''}</div>
-    </div>
-    <div class="kpi-box" style="border-top:3px solid ${errColor}">
-      <div class="kpi-label">예측 오차</div>
-      <div class="kpi-value" style="color:${errColor}">${out.error_mwh ?? '—'}</div>
-      <div class="kpi-unit">${out.error_pct != null ? out.error_pct + '%' : 'MWh'}</div>
-      <div style="font-size:10px;color:var(--muted);margin-top:4px">${out.error_pct != null && out.error_pct < 10 ? '✅ 매우 정확' : out.error_pct != null && out.error_pct < 20 ? '✅ 양호' : '참고용 (단일 스텝)'}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px">${out.block_rmse != null ? '블록 RMSE ' + out.block_rmse : (sim && sim.future_mode ? '미래 시뮬' : '')}</div>
     </div>
   `;
 
@@ -1097,13 +1106,41 @@ function renderPredictResult(data) {
     </div>` : ''}
   `;
 
-  // ── 모델 내부 단계 (간략화)
-  document.getElementById('model-pipeline-steps').innerHTML = [
-    `컨텍스트 ${inp.context_hours}h (전력 평균 ${inp.avg_power_mwh} MWh, 기온 평균 ${inp.avg_temp_c}°C) 로드`,
-    `TTM-r2 (frozen) → 512h 패턴을 192차원 임베딩으로 압축 (L2 norm: ${mdl.ttm_emb_l2norm})`,
-    `시간·요일 피처 8차원 + 임베딩 → 2층 GRU (hidden=64)`,
-    `스케일 역변환 → <strong>${out.pred_mwh} MWh</strong>  (실측: ${out.actual_day_avg_mwh ?? '알 수 없음'} MWh)`,
-  ].map(s => `<li style="padding:3px 0">${s}</li>`).join('');
+  // ── 모델 내부 단계
+  const pipelineSteps = isOneshot ? [
+    `컨텍스트 ${inp.context_hours}h (전력 ${inp.avg_power_mwh} MWh, 기온 ${inp.avg_temp_c}°C)`,
+    sim && sim.future_mode
+      ? `미래 컨텍스트: ${sim.note || (sim.target_year ? sim.target_year + '→' + sim.proxy_year + '년' : sim.proxy_year + '년') + ' 실측 매핑'}`
+      : `2024 실측 컨텍스트 (512h 권장)`,
+    `Granite TTM-r2 <strong>frozen</strong> → 96h one-shot (Hybrid roll 아님)`,
+    `출력: D+1 평균 <strong>${out.pred_day1_avg_mwh ?? out.pred_mwh} MWh</strong>, 96h 평균 ${out.pred_mwh} MWh`,
+  ] : [
+    `컨텍스트 ${inp.context_hours}h 로드`,
+    `TTM-r2 (frozen) → 192차원 임베딩 (L2: ${mdl.ttm_emb_l2norm ?? '—'})`,
+    `GRU head 1-step (ablation)`,
+    `예측 <strong>${out.pred_mwh} MWh</strong>`,
+  ];
+  document.getElementById('model-pipeline-steps').innerHTML =
+    pipelineSteps.map(s => `<li style="padding:3px 0">${s}</li>`).join('');
+
+  // ── 96h 블록 차트
+  if (fb && fb.timestamps && fb.predicted) {
+    Plotly.newPlot('chart-forecast-block', [{
+      x: fb.timestamps, y: fb.predicted,
+      type: 'scatter', mode: 'lines',
+      name: 'TTM 96h 예측',
+      line: { color: '#7c3aed', width: 2 },
+      fill: 'tozeroy', fillcolor: 'rgba(124,58,237,0.08)',
+    }], {
+      margin: { t: 10, b: 30, l: 50, r: 10 }, height: 200,
+      yaxis: { title: 'MWh', tickfont: { size: 10 } },
+      xaxis: { tickfont: { size: 9 } },
+      showlegend: false,
+    }, { responsive: true, displayModeBar: false });
+  } else {
+    document.getElementById('chart-forecast-block').innerHTML =
+      '<p style="font-size:12px;color:var(--muted);padding:20px;text-align:center">96h 블록 데이터 없음</p>';
+  }
 
   // ── 컨텍스트 차트
   const ctxStart = inp.context_start;

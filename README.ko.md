@@ -116,14 +116,16 @@ flowchart LR
 flowchart LR
     TRAIN["학습: 2020–2023<br/>35,064시간"] --> TEST["검증: 2024년<br/>91블록 × 96h"]
     TEST --> METRIC["TTM one-shot<br/>RMSE 111.5 MWh"]
-    TEST --> FUTURE["2025–2027 시뮬레이션<br/>과거 연도 계절 패턴 재사용"]
+    TEST --> FUTURE["2025–2027 시뮬레이션<br/>과거 실측 프록시 + TTM 96h one-shot"]
 ```
 
-| 미래 연도 | 컨텍스트로 쓰는 실측 |
-|-----------|---------------------|
-| 2025 | 2024년 같은 계절 |
-| 2026 | 2023년 같은 계절 |
-| 2027 | 2022년 같은 계절 |
+| 미래 연도 | 컨텍스트 소스 (실측 프록시) |
+|-----------|---------------------------|
+| 2025 | 2024년 같은 양력·시각 (명절: 2024 설 기준 일수 오프셋) |
+| 2026 | 2023년 같은 양력·시각 (명절: 2023 설 기준) |
+| 2027 | 2022년 같은 양력·시각 (명절: 2022 설 기준) |
+
+선택 연구 경로: `python -m pipelines.seoul.ttm_roll_forward --through-year 2027` (TTM 블록 연쇄 합성 이력)
 
 ---
 
@@ -133,7 +135,7 @@ flowchart LR
 flowchart TB
     subgraph GIT["GitHub에 포함 ✅"]
         CODE["코드<br/>demo/ analysis/ pipelines/"]
-        DOC["문서<br/>ppt_prompt.md 대본_draft.md"]
+        DOC["문서<br/>docs/ archive/course/"]
         JSON["결과 JSON<br/>track*_results.json backtest_summary"]
         SUBM["제출물<br/>submission/00조_기말/"]
         MODEL_SMALL["소형 모델<br/>hybrid_seoul.pt 302KB"]
@@ -194,9 +196,9 @@ granite-tsfm/
 ├── analysis/                 ← Track 1~3 분석 스크립트·JSON
 ├── pipelines/seoul/          ← 데이터 병합·학습·백테스트 (재현 핵심)
 ├── submission/00조_기말/     ← 교수님 제출 zip (노트북·샘플·소형 모델)
-├── ppt_prompt.md             ← PPT 18슬라이드 설계
-├── 대본_draft.md             ← 발표 대본
-├── report_revised.md         ← 보고서 수정본
+├── docs/                     ← 프로젝트 문서 (아키텍처·벤치마크·데이터 카드)
+├── archive/course/             ← PPT·대본·보고서 초안 (수업 제출물)
+├── benchmarks/               ← Prophet 등 베이스라인 재현
 ├── Data/                     ← 병합·기온 parquet (Git 포함)
 └── artifacts/seoul/          ← 로컬 전용 (모델·검증·PPT 그림)
 ```
