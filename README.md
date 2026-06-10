@@ -1,4 +1,8 @@
 # TSFM: Time Series Foundation Models
+
+> **조3조 기말 프로젝트 (KPX 전력거래량 분석 · AI 예측)**  
+> 한국어 전체 문서 → **[README.ko.md](README.ko.md)** · 레포: https://github.com/Kyle-Riss/granite-tsfm
+
 Public notebooks, utilities, and serving components for working with Time Series Foundation Models (TSFM).
 
 The core TSFM time series models have been made available on Hugging Face -- check out the granite time series collection [here](https://huggingface.co/collections/ibm-granite/granite-time-series-models). Additional details can be found in our
